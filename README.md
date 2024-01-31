@@ -2,4 +2,4 @@
 
 [![Top Langs](https://github-readme-stats.vercel.app/api/top-langs?username=adamhl8&layout=compact&langs_count=8&exclude_repo=skyhold.gg,wow-guild-website)](https://github.com/anuraghazra/github-readme-stats)
 
-- 📫 How to reach me: **adamhl@pm.me**
+📫 How to reach me: **adamhl@pm.me**
