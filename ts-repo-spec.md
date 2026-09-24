@@ -13,6 +13,7 @@ This document specifies the repo's target state (the archetype it belongs to, th
 - **Do not release.** Set up and verify the release tooling, but do NOT bump the version, generate `CHANGELOG.md` contents, create a git tag, publish, or trigger the release (`gh workflow run release.yml`, `just release`, `just release-run`). An empty `CHANGELOG.md` is created now only if the repo doesn't already have one (see README.md, CHANGELOG.md, and LICENSE). Its contents are generated on the first real release.
 - **Do not `tofu apply`.** Set tofu up fully and report what `tofu plan` wants to change, but leave `tofu apply` to me: I review and apply it manually. Whenever the plan has pending changes (always on a first setup, and after any change to `github.tofu` or to `description`, `keywords`, or `homepage` in `package.json`, which the module reads), `tofu-check` (and with it `just build` and the pre-commit hook) fails until I apply. That is expected: note it in the report instead of trying to fix it.
 - **Do not change GitHub directly.** Don't delete or edit Actions secrets or repo settings with `gh`. `tofu apply` owns them, and a stale secret goes in the report for me to delete or for my apply to remove (see Stale secrets).
+- **The repo is the source of truth, not GitHub.** `github.tofu` and the `package.json` fields the module reads (`description`, `keywords`, `homepage`) define the GitHub repo's state, and `tofu apply` pushes them there. Never copy GitHub's current state back into the repo to shrink the plan. A difference between the two is a pending change for the report. The one exception is `visibility` when `github.tofu` is first created (see Baseline (f)).
 - **Do not commit.** Leave every change uncommitted (staged or unstaged is fine) so the diff can be reviewed.
 - **Global tools**, assumed already installed (NOT project deps): `bun`, `just`, `lefthook`, `git-cliff`, `actionlint`, `gh`, `tofu`, `aws`. Also assumed: an AWS credentials profile named `adamhl8` (tofu's S3 state backend, and the base justfile gates its tofu recipes on `aws configure list-profiles` finding it) and the sops age key for `~/homelab/secrets/credentials.yaml` (the tofu module decrypts it to read secret values). If any is missing, stop and report. Everything else is a local devDependency. (`git-cliff` is global because `release-it-git-cliff` shells out to the `git-cliff` on `PATH`.)
 - Preserve the repo's identity: `name`, `version`, real dependencies, and repo-specific `imports`/`exports` entries. The metadata fields around them have one canonical shape (see Metadata fields), and normalizing to it is in scope. Change only what this spec describes.
@@ -104,7 +105,7 @@ Several choices below are decided by what the repo *is*. Pick the archetype firs
 Notes that cut across the table:
 
 - **Archetypes combine.** Each column follows from the part of the repo it describes. A CLI published to npm is an npm library that ships a `bin` (see Published package shapes). A published package that also attaches release artifacts is an npm library plus release-it hooks and `github.assets`.
-- **`"private": true` is about npm, not GitHub.** It doesn't imply a private GitHub repo: `github.tofu`'s `visibility` matches the actual GitHub repo (see github.tofu). `"private": true` is what makes release-it skip the npm publish step.
+- **`"private": true` is about npm, not GitHub.** It doesn't imply a private GitHub repo: `github.tofu`'s `visibility` is set on its own (see github.tofu). `"private": true` is what makes release-it skip the npm publish step.
 - **Release-specific work never gets its own workflow job.** Building and attaching artifacts and post-release publishing go in `.release-it.ts` hooks (see .release-it.ts), and a docker image or system packages go in the `release.yml` inputs. `before-release` (system packages for the release build) fits any archetype, so "no inputs" in the table is only the default. The only job a repo may append is a deploy job (see GitHub Actions).
 
 ### Published package shapes
@@ -314,7 +315,7 @@ Substitute `<repo-name>` in both places (the backend `key` and `repo_name`), set
 
 Other module inputs and behavior:
 
-- `visibility` is required ("public" or "private", matching the actual repo) and is the only `repo_settings` field. It is unrelated to npm's `"private": true`: a private npm package can live in a public GitHub repo.
+- `visibility` is required ("public" or "private") and is the only `repo_settings` field. An existing `github.tofu` keeps its value. A new one takes the repo's current visibility (see Baseline (f)). It is unrelated to npm's `"private": true`: a private npm package can live in a public GitHub repo.
 - The module reads the repo's `package.json` for the repo description, topics, and homepage (see Metadata fields).
 - `tofu init` (run by `just prepare`) generates `.terraform/` and `.terraform.lock.hcl`, both untracked (the synced `.gitignore` block covers them). `github.tofu` is the only tofu file that gets committed.
 
@@ -520,7 +521,7 @@ These have one canonical shape and order. Every repo carries the shared fields, 
 
 - `<repo-name>` comes from the actual git remote (`git remote get-url origin`), never from the existing field values: metadata copy-pasted from another repo happens (a `repository`/`homepage`/`bugs` block pointing at a different repo), and correcting it to this repo's URLs is in scope.
 - `description` is required: the tofu module sets the GitHub repo description from it (the plan errors when it's missing), so add or fill one if missing or empty. Do not end it with a period unless it is multiple sentences.
-- `keywords` become the GitHub topics at `tofu apply`, and a missing field clears existing topics. A published package must have them (draft them from the description if missing). A `"private": true` repo mirrors its existing topics (from Baseline (f)) and omits the field only when the repo has none. Either way each entry must be a valid topic slug: lowercase, hyphenated, no spaces (`"error handling"` -> `"error-handling"`).
+- `keywords` become the GitHub topics at `tofu apply`, and a missing field clears existing topics. They come from the repo, never from GitHub's current topics. Any repo may have them, published or `"private": true`, depending on the kind of project. A published package must have them (draft them from the description if missing). Any other repo keeps the `keywords` it has, and gets them drafted from the description only when the project is one people would search for (a reusable tool or plugin, not a personal app or site). Either way each entry must be a valid topic slug: lowercase, hyphenated, no spaces (`"error handling"` -> `"error-handling"`).
 - `homepage` also feeds `tofu apply`: the module sets the GitHub repo's homepage from it, except that a `homepage` pointing at the repo itself (the canonical value above) is treated as redundant and leaves the GitHub homepage unset. Keep the canonical repo URL unless the package has a real docs/project site.
 - On a `"private": true` repo, `homepage` is kept only when it's a real site (e.g. a website repo's own domain), because that is what sets the GitHub homepage. One whose `homepage` is just the repo URL drops it, along with `bugs`.
 - `license` is the SPDX id of the `LICENSE` file (see README.md, CHANGELOG.md, and LICENSE): `"MIT"`, unless the repo keeps another license (e.g. `"OFL-1.1"`).
@@ -677,7 +678,7 @@ Read `package.json`, `tsconfig.json`, whatever configs are present, and the `src
 - (c) does it have tests, and are they on `bun:test`?
 - (d) does it have relative imports, or an internal-import alias other than `#*`?
 - (e) what still fills a role the target stack owns?
-- (f) what does GitHub say? `gh repo view --json visibility,repositoryTopics` gives the `visibility` for `github.tofu` and the topics a `"private": true` repo's `keywords` mirror (see Metadata fields). If it fails because the repo doesn't exist (not an auth error), skip the tofu import, set `visibility = "private"`, and flag it in the report.
+- (f) does the repo exist on GitHub, and what `visibility` does a new `github.tofu` get? An existing `github.tofu` keeps its own `visibility`. Otherwise `gh repo view --json visibility` gives it. If that fails because the repo doesn't exist (not an auth error), skip the tofu import, set `visibility = "private"` in a new `github.tofu`, and flag it in the report.
 
 ### Apply
 
