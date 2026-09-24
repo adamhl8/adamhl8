@@ -543,7 +543,7 @@ Every script lives in the justfile (the standard ones come from the base, repo-s
 
 ### devDependencies
 
-These versions or newer, matching what current `@adamhl8/configs` expects:
+The repo must have each of these. The versions are only the range to write when adding a missing entry. Never change the version of an entry the repo already has: `just bump-deps` (Apply step 3) moves every dependency to its newest.
 
 ```
 @adamhl8/configs                ^2.8.0
@@ -685,7 +685,7 @@ Read `package.json`, `tsconfig.json`, whatever configs are present, and the `src
 In this order (some steps are order-sensitive):
 
 1. Apply everything in Migrating from older setups that the baseline turned up.
-2. Write everything in Files that must exist and the `package.json` edits (the `imports` map and the devDependency floors included). Apply every Code convention that lint doesn't autofix (everything under bun and Commands and containers), minding Where bun APIs stop. Leave subpath imports, import extensions, and direct exports to the autofix in step 5.
+2. Write everything in Files that must exist and the `package.json` edits (the `imports` map, and any missing devDependency at its listed range). Leave existing dependency versions alone, because step 3 bumps them. Apply every Code convention that lint doesn't autofix (everything under bun and Commands and containers), minding Where bun APIs stop. Leave subpath imports, import extensions, and direct exports to the autofix in step 5.
 3. `bun install`, then **immediately** run `just bump-deps` **twice**, even if the repo looked fully migrated at baseline (this step is never skipped). Every later step assumes deps are already at their newest.
 
    `bump-deps` runs `bunx npm-check-updates --upgrade`, which goes past the ranges in `package.json` and rewrites them (this, not the plain install, is what moves `@adamhl8/configs` past the `^2.8.0` floor to whatever is newest), then reinstalls from scratch (`rm -f bun.lock`, `rm -rf node_modules/`, `bun install --no-cache`). The reinstall runs lifecycle scripts, so `prepare` -> `just prepare` -> `lefthook install` + `tofu init` + the `.gitignore` and `bunfig.toml` syncs all happen as part of it (watch for a `sync hooks` line confirming the `pre-commit`/`commit-msg` hooks were installed).
