@@ -1,24 +1,24 @@
-You are conforming a TypeScript repo to my standard tooling. The target: **bun** (package manager, script runner, and test runner), **just** (task runner, a one-line justfile importing the shared base from `@adamhl8/configs`), **oxlint + oxfmt** (lint/format), **lefthook** (git hooks), **commitlint** (conventional commits), **release-it + `release-it-git-cliff`** (release/changelog, a release-it plugin that drives git-cliff), **tofu** (an OpenTofu `github.tofu` that manages the GitHub repo's settings and Actions secrets via a module shipped in `@adamhl8/configs`), **`bun test`** configured through a synced **`bunfig.toml`**, and **`#*` subpath imports** for internal source.
+You are conforming a TypeScript repo to my standard tooling. The target: **bun** (package manager, script runner, and test runner), **bask** (task runner, a one-line `bask.ts` re-exporting the shared base tasks from `@adamhl8/configs/bask`, with `@adamhl8/bask` as a devDependency), **oxlint + oxfmt** (lint/format), **lefthook** (git hooks), **commitlint** (conventional commits), **release-it + `release-it-git-cliff`** (release/changelog, a release-it plugin that drives git-cliff), **tofu** (an OpenTofu `github.tofu` that manages the GitHub repo's settings and Actions secrets via a module shipped in `@adamhl8/configs`), **`bun test`** configured through a synced **`bunfig.toml`**, and **`#*` subpath imports** for internal source.
 
 Almost everything the repo needs comes from **`@adamhl8/configs`**, so the version it's on determines how much work this is. Two realistic starting points:
 
-- **The common case**: the repo is already on bun/just/oxlint/lefthook but on an older `@adamhl8/configs`. It looks migrated. It is not: the base changes underneath it between versions (dead config-merge APIs, removed bins, new required devDependencies). The real work is the bump and its fallout, and Leftovers from older `@adamhl8/configs` (under Migrating from older setups) lists what to hunt for.
+- **The common case**: the repo is already on bun/oxlint/lefthook but on an older `@adamhl8/configs`. It looks migrated. It is not: the base changes underneath it between versions (dead config-merge APIs, removed bins, new required devDependencies). The real work is the bump and its fallout, and Leftovers from older `@adamhl8/configs` (under Migrating from older setups) lists what to hunt for. The biggest one: a repo on `@adamhl8/configs` 2.x still has a `justfile`, and v3 replaced the base justfile with base bask tasks. `bump-deps` can't do that migration on its own, and the reusable workflows now run `bunx bask`, so CI and the weekly update-deps PR stay red until `bask.ts` exists.
 - **The rare case**: the repo is on some older stack entirely (a different package manager, linter, test runner, or hook setup). Migrating from older setups covers it by role, whatever the tool was.
 
-This document specifies the repo's target state (the archetype it belongs to, the files that must exist and their contents, the `package.json` shape, and the code conventions), then what to remove or rewrite when migrating from an older setup, then a compact procedure to apply and verify it all. Apply only what's missing, and leave anything already in the target state alone. Even when nothing appears to be missing, still run the procedure's install/bump/lint/verify steps (in particular, `just bump-deps` always runs at least twice).
+This document specifies the repo's target state (the archetype it belongs to, the files that must exist and their contents, the `package.json` shape, and the code conventions), then what to remove or rewrite when migrating from an older setup, then a compact procedure to apply and verify it all. Apply only what's missing, and leave anything already in the target state alone. Even when nothing appears to be missing, still run the procedure's install/bump/lint/verify steps (in particular, `bunx bask bump-deps` always runs at least twice).
 
 ## Invariants
 
 - Prefer `@adamhl8/configs` defaults: call each factory with no arguments, and make the smallest change that makes the tooling pass. Add an argument only when this spec calls for one (a required key, a package shape, release artifacts, a generated directory) or a lint failure clearly does.
-- **Do not release.** Set up and verify the release tooling, but do NOT bump the version, generate `CHANGELOG.md` contents, create a git tag, publish, or trigger the release (`gh workflow run release.yml`, `just release`, `just release-run`). An empty `CHANGELOG.md` is created now only if the repo doesn't already have one (see README.md, CHANGELOG.md, and LICENSE). Its contents are generated on the first real release.
-- **Do not `tofu apply`.** Set tofu up fully and report what `tofu plan` wants to change, but leave `tofu apply` to me: I review and apply it manually. Whenever the plan has pending changes (always on a first setup, and after any change to `github.tofu` or to `description`, `keywords`, or `homepage` in `package.json`, which the module reads), `tofu-check` (and with it `just build` and the pre-commit hook) fails until I apply. That is expected: note it in the report instead of trying to fix it.
+- **Do not release.** Set up and verify the release tooling, but do NOT bump the version, generate `CHANGELOG.md` contents, create a git tag, publish, or trigger the release (`gh workflow run release.yml`, `bunx bask release`, `bunx bask release-run`). An empty `CHANGELOG.md` is created now only if the repo doesn't already have one (see README.md, CHANGELOG.md, and LICENSE). Its contents are generated on the first real release.
+- **Do not `tofu apply`.** Set tofu up fully and report what `tofu plan` wants to change, but leave `tofu apply` to me: I review and apply it manually. Whenever the plan has pending changes (always on a first setup, and after any change to `github.tofu` or to `description`, `keywords`, or `homepage` in `package.json`, which the module reads), `tofu-check` (and with it `bunx bask build` and the pre-commit hook) fails until I apply. That is expected: note it in the report instead of trying to fix it.
 - **Do not change GitHub directly.** Don't delete or edit Actions secrets or repo settings with `gh`. `tofu apply` owns them, and a stale secret goes in the report for me to delete or for my apply to remove (see Stale secrets).
 - **The repo is the source of truth, not GitHub.** `github.tofu` and the `package.json` fields the module reads (`description`, `keywords`, `homepage`) define the GitHub repo's state, and `tofu apply` pushes them there. Never copy GitHub's current state back into the repo to shrink the plan. A difference between the two is a pending change for the report. The one exception is `visibility` when `github.tofu` is first created (see Baseline (f)).
 - **Do not commit.** Leave every change uncommitted (staged or unstaged is fine) so the diff can be reviewed.
-- **Global tools**, assumed already installed (NOT project deps): `bun`, `just`, `lefthook`, `git-cliff`, `actionlint`, `gh`, `tofu`, `aws`. Also assumed: an AWS credentials profile named `adamhl8` (tofu's S3 state backend, and the base justfile gates its tofu recipes on `aws configure list-profiles` finding it) and the sops age key for `~/homelab/secrets/credentials.yaml` (the tofu module decrypts it to read secret values). If any is missing, stop and report. Everything else is a local devDependency. (`git-cliff` is global because `release-it-git-cliff` shells out to the `git-cliff` on `PATH`.)
+- **Global tools**, assumed already installed (NOT project deps): `bun`, `lefthook`, `git-cliff`, `actionlint`, `gh`, `tofu`, `aws`. Also assumed: an AWS credentials profile named `adamhl8` (tofu's S3 state backend, and the base tasks gate their tofu steps on `aws configure list-profiles` finding it) and the sops age key for `~/homelab/secrets/credentials.yaml` (the tofu module decrypts it to read secret values). If any is missing, stop and report. Everything else is a local devDependency. (`git-cliff` is global because `release-it-git-cliff` shells out to the `git-cliff` on `PATH`.)
 - Preserve the repo's identity: `name`, `version`, real dependencies, and repo-specific `imports`/`exports` entries. The metadata fields around them have one canonical shape (see Metadata fields), and normalizing to it is in scope. Change only what this spec describes.
-- **Scope: the repo's own files.** These rules govern what the repo itself checks in. Anything shipped by `@adamhl8/configs` (the base justfile, the reusable workflows and their setup action, the base configs) is out of scope. Don't override or copy it just to make it conform to a rule here (e.g. to rewrite its flags or step names).
-- **Self-dependent packages.** A package that the shared tooling loads by name (a release-it plugin, an oxlint plugin, the configs package itself) depends on itself (`"file:."`) so its own tooling can find it. Such a repo may override `prepare` to build before the self-install, and may import the base justfile from its own source instead of `node_modules`. Those overrides are intentional: leave them alone.
+- **Scope: the repo's own files.** These rules govern what the repo itself checks in. Anything shipped by `@adamhl8/configs` (the base tasks, the reusable workflows and their setup action, the base configs) is out of scope. Don't override or copy it just to make it conform to a rule here (e.g. to rewrite its flags or step names).
+- **Self-dependent packages.** A package that the shared tooling loads by name (a release-it plugin, an oxlint plugin, bask, the configs package itself) depends on itself (`"file:."`) so its own tooling can find it. Such a repo may build before the self-install: with `prepare.before(...)` in its `bask.ts` (the configs package), or, when the package is bask itself and `bunx bask` can't run until it's built, with a `prepare` script that builds and reinstalls first (`tsdown && bun install --ignore-scripts --no-summary && bunx bask prepare`). The configs package's `bask.ts` imports the base tasks from its own source (`#configs/bask.base.ts`) instead of `@adamhl8/configs/bask`. Those overrides are intentional: leave them alone.
 
 ## Three facts that shape everything
 
@@ -55,7 +55,7 @@ It enables `correctness`/`pedantic`/`perf`/`restriction`/`style`/`suspicious`/`n
 
 All three autofix, but `require-subpath-imports` and `require-import-extensions` can rewrite the same import (`./foo` -> `#foo` -> `#foo.ts`), so convergence may take more than one `--fix` pass.
 
-What the base already allows: it exempts the config files (`.release-it.ts`, `astro.config.ts`, `commitlint.config.ts`, `knip.ts`, `oxfmt.config.ts`, `oxlint.config.ts`, `prisma.config.ts`, `tsdown.config.ts`) from `import/no-default-export`, and `.release-it.ts` from `no-template-curly-in-string` (for `${version}` hooks). It turns `node/no-top-level-await` and `one-var` off. In `.tsx` files, `func-style` allows function declarations that are named exports (React components).
+What the base already allows: it exempts the config files (`.release-it.ts`, `astro.config.ts`, `commitlint.config.ts`, `knip.ts`, `oxfmt.config.ts`, `oxlint.config.ts`, `prisma.config.ts`, `tsdown.config.ts`) from `import/no-default-export`, `.release-it.ts` from `no-template-curly-in-string` (for `${version}` hooks), and `bask.ts` from `clean-modules/require-direct-exports` and `import/export` (for its `export *`). It turns `node/no-top-level-await` and `one-var` off. In `.tsx` files, `func-style` allows function declarations that are named exports (React components).
 
 Beyond autofixes, expect real source changes: function declarations -> arrow expressions (`func-style`), interface method signatures -> property signatures (`method-signature-style`), `import * as x` -> named imports (`import/no-namespace`), and removing conditions the type-aware rules flag as redundant.
 
@@ -87,9 +87,10 @@ Real examples:
 - Tests (or a test harness) that set or read env vars across many files: `node/no-process-env` off via an override for the test files.
 - Ambient declaration files (`**/*.d.ts`) and Astro components (`**/*.astro`): `import/unambiguous` off via an override, since every one of them is legitimately a script.
 - A repo whose domain legitimately traffics in `null` everywhere (a query language with null literals, Prisma's nullable model types): `unicorn/no-null` off globally via the `rules` override.
+- Test fixtures that stand in for another project's files (e.g. a fixture `bask.ts` with relative imports or a default export): turn the rules they break off via an override for the fixtures glob, and add the glob to knip's `ignore`.
 - A generated directory (Prisma's client): not a suppression. Add it to `ignorePatterns` in both `oxlint.config.ts` and `oxfmt.config.ts`, and exclude it from knip via `project: ["!./src/generated/**/*"]`.
 
-**3. No semicolons.** The oxfmt base sets `semi: false` and `printWidth: 120`. Every snippet in this document is written the way its formatter leaves it (oxfmt, or `just --fmt` and `tofu fmt` for the justfile and tofu snippets, which `just lint` also runs). Don't add semicolons back: `just lint` strips them anyway.
+**3. No semicolons.** The oxfmt base sets `semi: false` and `printWidth: 120`. Every snippet in this document is written the way its formatter leaves it (oxfmt, or `tofu fmt` for the tofu snippets, which `bunx bask lint` also runs). Don't add semicolons back: `bunx bask lint` strips them anyway.
 
 ## Repo archetypes
 
@@ -99,7 +100,7 @@ Several choices below are decided by what the repo *is*. Pick the archetype firs
 | --- | --- | --- | --- | --- | --- |
 | **npm library** | published | `tsdownConfig`, or none for an asset package (see Published package shapes) | `NPM_CI_TOKEN = true` | no inputs, `contents: write` | npm publish |
 | **docker app** | `"private": true` | none, or `tsdownBundleConfig` for a side bundle | omit the block (defaults), unless `GH_TOKEN` | `docker-image: <image-name>`, `contents: write` + `packages: write` | ghcr image |
-| **compiled binary** | `"private": true` | none (`bun build --compile` in a justfile recipe) | omit the block (defaults), unless `GH_TOKEN` | no inputs, `contents: write` | release-it hooks + `github.assets` |
+| **compiled binary** | `"private": true` | none (`bun build --compile` in a bask task) | omit the block (defaults), unless `GH_TOKEN` | no inputs, `contents: write` | release-it hooks + `github.assets` |
 | **plugin / bundle** | `"private": true` | `tsdownBundleConfig` | omit the block (defaults), unless `GH_TOKEN` | no inputs, `contents: write` | release-it hooks + `github.assets` |
 
 Notes that cut across the table:
@@ -117,7 +118,7 @@ A package published to npm takes one of four shapes, decided by how it's consume
 | **typed library** | something consumers import | `tsdownConfig({ platform: "node" })` | `{ ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } }` | `.d.ts` shipped | on, `@arethetypeswrong/core` is a devDependency |
 | **CLI-only** | a `bin`, no importable API | `tsdownConfig({ platform: "node", dts: false, attw: false })` | none | none | off, no `@arethetypeswrong/core` |
 | **host-loaded** | loaded by name by another tool (e.g. a release-it plugin), no consumer imports its types | `tsdownConfig({ platform: "node", dts: false, attw: false })` | `{ ".": { "import": "./dist/index.js" } }` | none | off, no `@arethetypeswrong/core` |
-| **asset package** | non-code files (fonts, CSS), generated by a justfile recipe if at all | none | none | none | off, and no publint either (nothing runs tsdown) |
+| **asset package** | non-code files (fonts, CSS), generated by a bask task if at all | none | none | none | off, and no publint either (nothing runs tsdown) |
 
 - A typed library can also ship a `bin` (a library with a companion CLI). It stays a typed library.
 - attw checks only importable, typed entrypoints. On a package with no `exports` it fails with "No resolution", and on `exports` without types it fails with "Package has no types". That's why it's off for the untyped shapes, not a workaround. publint stays on for the three built shapes and still validates `bin` and `files`.
@@ -128,18 +129,18 @@ A package published to npm takes one of four shapes, decided by how it's consume
 
 Create these verbatim (each wrapper just calls a factory from `@adamhl8/configs`). Follow the house style (fact 1) for any that need overrides. If the repo already has one of these files in a different shape (say a `lefthook.yaml` with its own inline `pre-commit:`/`commands:` block from an earlier partial setup), replace it with the form below. Do not merge the two. A config for the same tool under another filename is covered in Migrating from older setups.
 
-### justfile
+### bask.ts
 
-The standard scripts live in a shared base justfile, not in `package.json`:
+The standard tasks live in a shared base tasks module, not in `package.json`. The repo's `bask.ts` re-exports them:
 
-```just
-import "node_modules/@adamhl8/configs/dist/configs/justfile.base.just"
+```ts
+export * from "@adamhl8/configs/bask"
 ```
 
-That one line provides the recipes `lint`, `build`, `test`, `bump-deps`, `tofu-check`, `release`, `release-run` (private, run by the release workflow), `commit-types`, and `prepare`. Bare `just` lists the recipes and then prints the allowed commit types. What each does:
+That one line provides the tasks `lint`, `build`, `test`, `bump-deps`, `tofu-check`, `release`, `release-run` (hidden, run by the release workflow), `commit-types`, and `prepare`. Bare `bunx bask` (or `bunx bask --list`) lists the tasks and then prints the allowed commit types. What each does:
 
 - `prepare`: `lefthook install` (skipped in CI, i.e. when `CI` is set, so commits made by the workflows don't run the hooks), then the `.gitignore` and `bunfig.toml` syncs (see Synced files), then `tofu init -upgrade`. The tofu step is gated on the same condition as `tofu-check`, so it's a no-op where it doesn't apply.
-- `lint`: markdown-toc (regenerates the README TOC), `oxlint --fix --fix-suggestions --fix-dangerously`, `oxfmt`, `just --fmt` on every justfile and `tofu fmt` on every tofu file (both skip gitignored files), `knip-bun`, `actionlint` (only when `.github/workflows/` exists), then `just test`.
+- `lint`: markdown-toc (regenerates the README TOC), `oxlint --fix --fix-suggestions --fix-dangerously`, `oxfmt`, `tofu fmt` on every tofu file (skipping gitignored files), `knip-bun`, `actionlint` (only when `.github/workflows/` exists), then `test`.
 - `test`: `bun test --pass-with-no-tests`, so a repo with no tests passes.
 - `build`: `lint`, then `tsdown` only if `tsdown.config.ts` exists, then `tofu-check` last. In CI it also fails if the run changed or created any file (`git add --intent-to-add --all && git diff --exit-code`). So everything the install, `prepare`, lint, and tsdown write must be committed exactly as they leave it, or be gitignored.
 - `tofu-check`: `tofu plan -detailed-exitcode -concise -compact-warnings`, a drift check that fails on any pending change. Runs only outside CI, only when a root `*.tofu` file exists, and only when the `adamhl8` AWS profile is available. So CI never needs tofu credentials, and someone without my AWS profile can still run `build`.
@@ -147,18 +148,46 @@ That one line provides the recipes `lint`, `build`, `test`, `bump-deps`, `tofu-c
 - `release`: `gh workflow run release.yml`. `release-run` is the actual `release-it` invocation (`bun release-it -VV --ci`), run by the workflow in CI. Do NOT run either.
 - `commit-types`: prints the commit types commitlint allows.
 
-Recipes invoke local bins through bun (`bun oxlint`, `bun knip-bun`, ...), and the base does not put `node_modules/.bin` on `PATH`. Repo-specific scripts also live in the justfile as extra recipes below the `import` (see Scripts).
+Tasks run as `bunx bask <task>`, never `bun bask <task>`, because `bun bask` runs `bask.ts` itself instead of the bask bin (bask exits with an error when that happens). A global `bask` install is optional (it hands off to the repo's local copy), but checked-in files always write `bunx bask`, because they can't count on it. Task names are the export names in kebab-case, so `bunx bask bump-deps` runs `bumpDeps`.
 
-Each public recipe in the base is a thin wrapper over a private `_recipe` that holds the actual body. A repo that modifies a standard recipe extends it below the `import` with this pattern, so the override still runs the original (never copy the body):
+Tasks invoke local bins through bun (`bun oxlint`, `bun knip-bun`, ...). Repo-specific scripts also live in `bask.ts` as extra exported tasks below the `export *` (see Scripts):
 
-```just
-# add steps after the original: dependencies run first, then the body
-bump-deps: _bump-deps
-    bun prisma generate
+```ts
+import { task } from "@adamhl8/bask"
 
-# add steps before and after: deps before `&&` run first, deps after run last
-lint: my-setup _lint && my-cleanup
+export * from "@adamhl8/configs/bask"
+
+export const buildBinaries = task(async ({ sh }) => {
+  await sh`bun build ./src/index.ts --compile --target bun-darwin-arm64 --outfile bin/<name>-darwin-arm64`
+})
 ```
+
+- Tasks are arrow functions passed to `task(...)`, named in camelCase and run in kebab-case.
+- Run every command with the `sh` the task receives, not bun's `$`. `sh` prints each command before running it with bun's `$`. To run one without printing it (e.g. a capture like `` sh`git branch --show-current`.echo(false).text() ``), use `.echo(false)`. `sh.cwd()`, `sh.env()`, `sh.nothrow()`, and `sh.echo()` set defaults for the rest of that task's commands. `.env()` replaces the whole environment, so spread `process.env` into it to keep the rest.
+- One repo task depends on another by calling it (`await clean()`), not through a hook. Each task runs at most once per invocation.
+- A task that only exists for a workflow or another task takes `task({ hidden: true }, ...)`, which keeps it runnable but out of the list.
+
+Hooks are for the base tasks, which a repo can't edit. A repo that modifies a standard task extends it with hooks instead of redefining it (never copy the body). `before` and `after` take tasks or plain functions, and a hook also runs when another task calls the hooked one, so extending `lint` extends `build` too:
+
+```ts
+import { task } from "@adamhl8/bask"
+import { bumpDeps, lint } from "@adamhl8/configs/bask"
+
+export * from "@adamhl8/configs/bask"
+
+export const astroSync = task(async ({ sh }) => {
+  await sh`bun astro sync`
+})
+
+lint.before(astroSync)
+bumpDeps.after(async ({ sh }) => {
+  await sh`bun prisma generate`
+})
+```
+
+A step that only extends a base task can be a plain function passed to the hook. Export it as a task only when it's worth running on its own.
+
+`bask.ts` is internal code: it uses bun APIs (see bun) and follows the same lint rules as the rest of the repo.
 
 ### Config wrappers
 
@@ -206,7 +235,7 @@ const config = knipConfig()
 export default config
 ```
 
-(Overrides are usually a stray binary knip can't resolve, e.g. `knipConfig({ ignoreBinaries: ["fd"] })` when a bun shell template shells out to `fd`.)
+(Overrides are usually a stray binary knip can't resolve, e.g. `knipConfig({ ignoreBinaries: ["fd"] })` when a bun shell template shells out to `fd`. Knip doesn't read commands run with bask's `sh`, so a devDependency whose bin runs only from a `bask.ts` task shows up as unused: list it in `ignoreDependencies`. The base already lists `bask.ts` as an entry.)
 
 `lefthook.yaml`:
 
@@ -215,7 +244,7 @@ extends:
   - node_modules/@adamhl8/configs/dist/configs/lefthook.base.yaml
 ```
 
-(The base hooks run `just build` on pre-commit and commitlint on commit-msg. The pre-commit hook fails when `just build` changes any file, such as a lint autofix or reformat, so the fixes have to be staged and the commit retried.)
+(The base hooks run `bunx bask build` on pre-commit and commitlint on commit-msg. The pre-commit hook fails when `bunx bask build` changes any file, such as a lint autofix or reformat, so the fixes have to be staged and the commit retried.)
 
 `tsconfig.json`:
 
@@ -242,7 +271,7 @@ A repo with release artifacts adds hooks and assets here rather than to the work
 ```ts
 const config = releaseItConfig({
   hooks: {
-    "after:bump": ["just build-binaries"],
+    "after:bump": ["bunx bask build-binaries"],
     "after:release": ["bun scripts/publish.ts ${version}"],
   },
   github: {
@@ -306,7 +335,7 @@ Substitute `<repo-name>` in both places (the backend `key` and `repo_name`), set
 | `CI_SIGNING_KEY` | `release.yml`: the signed release commit and tag | always (module default) |
 | `CI_TOKEN` | `update-deps.yml`: the dependency PR. `release.yml`: the release step (e.g. an `after:release` hook that pushes to another repo) | always (module default) |
 | `NPM_CI_TOKEN` | `release.yml`: the npm publish | only if the repo publishes to npm |
-| `GH_TOKEN` | `ci.yml`: `just build`, as `GITHUB_TOKEN`. `release.yml`: the docker build, as a BuildKit secret | only if a build calls the GitHub API |
+| `GH_TOKEN` | `ci.yml`: `bunx bask build`, as `GITHUB_TOKEN`. `release.yml`: the docker build, as a BuildKit secret | only if a build calls the GitHub API |
 | `additional_secrets` | a repo-specific job (e.g. the deploy job's `WATCHTOWER_API_TOKEN`) | as declared |
 
 - `actions_secrets` is a set of flags. `CI_SIGNING_KEY` and `CI_TOKEN` default to **true**, so the module always manages those two. `NPM_CI_TOKEN` and `GH_TOKEN` default to false. Keep `NPM_CI_TOKEN = true` only for a repo that publishes to npm. Every other archetype **omits the `actions_secrets` block** and takes the defaults, unless it needs `GH_TOKEN`, and then the block holds just `GH_TOKEN = true`. Anything else goes in the `additional_secrets` set of names.
@@ -317,11 +346,11 @@ Other module inputs and behavior:
 
 - `visibility` is required ("public" or "private") and is the only `repo_settings` field. An existing `github.tofu` keeps its value. A new one takes the repo's current visibility (see Baseline (f)). It is unrelated to npm's `"private": true`: a private npm package can live in a public GitHub repo.
 - The module reads the repo's `package.json` for the repo description, topics, and homepage (see Metadata fields).
-- `tofu init` (run by `just prepare`) generates `.terraform/` and `.terraform.lock.hcl`, both untracked (the synced `.gitignore` block covers them). `github.tofu` is the only tofu file that gets committed.
+- `tofu init` (run by `bunx bask prepare`) generates `.terraform/` and `.terraform.lock.hcl`, both untracked (the synced `.gitignore` block covers them). `github.tofu` is the only tofu file that gets committed.
 
 ### Synced files
 
-`.gitignore`: not written by hand. The base justfile's `prepare` recipe runs the `adamhl8-gitignore` bin, which keeps the shared ignore list at the top of the file above a marker line (the first run prepends the block, later runs replace everything above the marker, so updates propagate with package bumps). Everything below the marker is left untouched and is where project-specific entries live:
+`.gitignore`: not written by hand. The base `prepare` task runs the `adamhl8-gitignore` bin, which keeps the shared ignore list at the top of the file above a marker line (the first run prepends the block, later runs replace everything above the marker, so updates propagate with package bumps). Everything below the marker is left untouched and is where project-specific entries live:
 
 ```gitignore
 node_modules/
@@ -336,7 +365,7 @@ dist/
 
 On the first sync the repo's entire old `.gitignore` lands below the marker, so clean up after it: delete every line below the marker that the managed block above already covers (the old hand-maintained `node_modules/`, `dist/`, tofu entries, including equivalent spellings like `dist` without the slash), keeping only genuinely project-specific entries.
 
-`bunfig.toml`: committed, but not written by hand from scratch. bun has no extends mechanism for it, so the base justfile's `prepare` recipe runs the `adamhl8-bunfig` bin, which deep-merges the shared base config into the repo's `bunfig.toml` and writes the result back (a repo without one gets the base as-is), then formats it with oxfmt. The repo's values win over the base's on the merge, and the file is regenerated from the merged config, so comments don't survive. The base:
+`bunfig.toml`: committed, but not written by hand from scratch. bun has no extends mechanism for it, so the base `prepare` task runs the `adamhl8-bunfig` bin, which deep-merges the shared base config into the repo's `bunfig.toml` and writes the result back (a repo without one gets the base as-is), then formats it with oxfmt. The repo's values win over the base's on the merge, and the file is regenerated from the merged config, so comments don't survive. The base:
 
 ```toml
 [test]
@@ -365,9 +394,9 @@ preload = ["./src/test-setup.ts"]
 
 ### GitHub Actions
 
-Three workflows, each a thin wrapper around one of my shared reusable workflows. Every `uses:` line always points at `adamhl8/configs`, regardless of which repo you're working on, so do not rewrite it. The reusable workflows share a setup action (checkout, bun, `just`, actionlint, OpenTofu, `bun install`), and lefthook is never installed in CI. They run the base justfile recipes (`ci.yml` runs `just build`, `release.yml` runs `just release-run`), so on a repo whose workflows already point here, CI stays red until the `justfile` above exists. For which secrets each one uses, see Actions secrets.
+Three workflows, each a thin wrapper around one of my shared reusable workflows. Every `uses:` line always points at `adamhl8/configs`, regardless of which repo you're working on, so do not rewrite it. The reusable workflows share a setup action (checkout, bun, actionlint, OpenTofu, `bun install`), and lefthook is never installed in CI. They run the base tasks (`ci.yml` runs `bunx bask build`, `release.yml` runs `bunx bask release-run`, `update-deps.yml` runs `bunx bask bump-deps`), so on a repo whose workflows already point here, CI stays red until the `bask.ts` above exists. For which secrets each one uses, see Actions secrets.
 
-`.github/workflows/ci.yml` runs `just build` (lint + build) on pushes and PRs. On a push it lints the commit message, and on a PR it lints the PR title, because squash merges (the only merge the tofu module allows) use the title as the commit message. The `edited` type re-lints a retitled PR, and the reusable workflow skips the build for it:
+`.github/workflows/ci.yml` runs `bunx bask build` (lint + build) on pushes and PRs. On a push it lints the commit message, and on a PR it lints the PR title, because squash merges (the only merge the tofu module allows) use the title as the commit message. The `edited` type re-lints a retitled PR, and the reusable workflow skips the build for it:
 
 ```yaml
 name: CI
@@ -383,7 +412,7 @@ jobs:
     uses: adamhl8/configs/.github/workflows/ci.yml@main
 ```
 
-`ci.yml` takes no secrets by default. A repo that needs `GH_TOKEN` passes it **by name**, never `secrets: inherit`, since CI runs on every PR and shouldn't be handed the release secrets it never uses. It reaches `just build` renamed to `GITHUB_TOKEN`, because Actions secrets can't be named `GITHUB_*`. When it's unset, the build falls back to the auto-provisioned token, so fork PRs still build:
+`ci.yml` takes no secrets by default. A repo that needs `GH_TOKEN` passes it **by name**, never `secrets: inherit`, since CI runs on every PR and shouldn't be handed the release secrets it never uses. It reaches `bunx bask build` renamed to `GITHUB_TOKEN`, because Actions secrets can't be named `GITHUB_*`. When it's unset, the build falls back to the auto-provisioned token, so fork PRs still build:
 
 ```yaml
 jobs:
@@ -428,7 +457,7 @@ jobs:
 The reusable release workflow takes two optional inputs, and they exist precisely so a repo doesn't add its own jobs:
 
 - **`docker-image`**: builds the repo's `Dockerfile` and pushes it to `ghcr.io/adamhl8/<docker-image>:latest` once the release lands, checking out the tag the release just created. The image name is separate from the repo name, since they often differ. The caller must **also** grant `packages: write` (a called workflow's permissions are capped by what the calling job grants). If the Dockerfile's build calls the GitHub API, `GH_TOKEN` reaches it as a BuildKit secret named `GH_TOKEN`, mounted with `RUN --mount=type=secret,id=GH_TOKEN,env=GITHUB_TOKEN`.
-- **`before-release`**: shell commands for a build that needs system packages. They run after the install and the git signing setup, just before `just release-run`.
+- **`before-release`**: shell commands for a build that needs system packages. They run after the install and the git signing setup, just before `bunx bask release-run`.
 
 ```yaml
 jobs:
@@ -477,7 +506,7 @@ A repo may append a **deploy** job after the release (it waits for the whole cal
 
 ### README.md, CHANGELOG.md, and LICENSE
 
-`README.md`: must exist, because `just lint` runs `markdown-toc -i ./README.md` and fails on a missing file. If the repo has none, create a minimal one (a title and the `package.json` description). Add `<!-- toc -->` / `<!-- tocstop -->` markers only if the README wants a table of contents.
+`README.md`: must exist, because `bunx bask lint` runs `markdown-toc -i ./README.md` and fails on a missing file. If the repo has none, create a minimal one (a title and the `package.json` description). Add `<!-- toc -->` / `<!-- tocstop -->` markers only if the README wants a table of contents.
 
 `CHANGELOG.md`: an empty file, created only if the repo doesn't already have one. Keep an existing changelog as-is, and either way do not generate its contents (that happens on the first real release, see Invariants).
 
@@ -514,7 +543,7 @@ These have one canonical shape and order. Every repo carries the shared fields, 
   "imports": { "#*": "./src/*" }, // see Code conventions (repo-specific extras like "#package.json" stay)
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } }, // † published only, form per Published package shapes (repo-specific extra subpaths stay)
   "publishConfig": { "access": "public" }, // † scoped (@adamhl8/...) published packages only
-  "scripts": { "prepare": "just prepare" },
+  "scripts": { "prepare": "bunx bask prepare" },
   // then dependencies / devDependencies / peerDependencies
 }
 ```
@@ -530,42 +559,43 @@ These have one canonical shape and order. Every repo carries the shared fields, 
 
 ### Scripts
 
-Every script lives in the justfile (the standard ones come from the base, repo-specific ones are recipes), and the only one left in `package.json` is `prepare`:
+Every script lives in `bask.ts` (the standard ones come from the base, repo-specific ones are exported tasks), and the only one left in `package.json` is `prepare`:
 
 ```json
 "scripts": {
-  "prepare": "just prepare"
+  "prepare": "bunx bask prepare"
 }
 ```
 
-- A repo-specific script (e.g. a Prisma app's `db:*`) is a recipe below the `import` (just recipe names can't contain `:`, so `db:generate` -> `db-generate`). A repo-specific extra step in a standard flow extends the base recipe via the `_recipe` wrapper pattern (see justfile).
+- A repo-specific script (e.g. a Prisma app's `db:*`) is an exported task below the `export *` (`db:generate` -> `export const dbGenerate`, run as `bunx bask db-generate`). A repo-specific extra step in a standard flow extends the base task with a hook (see bask.ts).
 - The only exception is a genuine npm lifecycle script, something the package manager itself must trigger (like `prepare`): those stay in `package.json`. Anything else goes, including `prepublishOnly` and any script that existed only to run replaced tooling.
 
 ### devDependencies
 
-The repo must have each of these. The versions are only the range to write when adding a missing entry. Never change the version of an entry the repo already has: `just bump-deps` (Apply step 3) moves every dependency to its newest.
+The repo must have each of these. The versions are only the range to write when adding a missing entry. Never change the version of an entry the repo already has: `bunx bask bump-deps` (Apply step 3) moves every dependency to its newest. The one exception is an `@adamhl8/configs` below 3, which goes to `^3.0.3` before the first install: `bask.ts` imports `@adamhl8/configs/bask`, which only exists from v3, and both `prepare` and `bump-deps` run through it.
 
 ```
-@adamhl8/configs                ^2.8.0
-oxlint                          ^1.85.0
-oxlint-tsgolint                 ^7.0.2003
-oxfmt                           ^0.70.0
-@commitlint/cli                 ^21.2.3
-@commitlint/config-conventional ^21.2.3
-release-it                      ^21.1.0
+@adamhl8/configs                ^3.0.3
+@adamhl8/bask                   ^0.3.0
+oxlint                          ^1.88.0
+oxlint-tsgolint                 ^7.0.2004
+oxfmt                           ^0.73.0
+@commitlint/cli                 ^21.2.4
+@commitlint/config-conventional ^21.2.4
+release-it                      ^21.1.1
 release-it-git-cliff            ^0.2.0
-@types/bun                      ^1.4.2    (replaces @types/node, the base tsconfig sets types: ["bun"])
-knip                            ^6.38.0
+@types/bun                      ^1.4.3    (replaces @types/node, the base tsconfig sets types: ["bun"])
+knip                            ^6.42.0
 typescript                      ^7.0.2
 markdown-toc                    ^1.2.0
-tsdown                          ^0.23.0   (only if the repo builds, see Repo archetypes)
-publint                         ^0.3.24   (published packages that build)
+tsdown                          ^0.23.1   (only if the repo builds, see Repo archetypes)
+publint                         ^0.3.25   (published packages that build)
 @arethetypeswrong/core          ^0.18.5   (typed libraries only, see Published package shapes)
 ```
 
-`release-it-git-cliff` is the one addition that the weekly update-deps PR can't make. `bump-deps` upgrades `@adamhl8/configs` on its own, but it never adds a new devDependency, so the gap may only show up when release-it fails to load the plugin. Check for it even on a repo that already looks current.
+`@adamhl8/bask` and `release-it-git-cliff` are additions that the weekly update-deps PR can't make. `bump-deps` upgrades `@adamhl8/configs` on its own, but it never adds a new devDependency, so the gap may only show up when `bunx bask` can't find bask or release-it fails to load the plugin. Check for both even on a repo that already looks current.
 
-- Do NOT add `lefthook`, `bun`, `just`, `git-cliff`, or `actionlint` (global tools).
+- Do NOT add `lefthook`, `bun`, `git-cliff`, or `actionlint` (global tools).
 - If the repo imports `@adamhl8/configs/env` (`parseEnv`/`requireWhen`) from runtime code (an app's `env.ts`, a `prisma.config.ts`), `@adamhl8/configs` belongs in `dependencies`, not `devDependencies`.
 - Remove an empty `"dependencies": {}` if present. Leave real runtime `dependencies` untouched.
 
@@ -605,7 +635,7 @@ export const foo = 1 // autofixed
 **Where bun APIs stop.** The boundary is npm compatibility, plus one runtime exception:
 
 - A repo that publishes to npm keeps its shipped code (everything that lands in `dist/` for consumers) on node APIs **only**, so the package stays node-compatible. Do not introduce bun APIs there. This includes a published CLI's `bin` entrypoint, even for a tool you only ever run locally: it keeps a node shebang (see Shebangs) and uses node APIs (`node:child_process`, or `execa` per the exception below) instead of `$` from `"bun"`.
-- Everything else can and should use bun APIs: repos not published to npm (a `"private": true` app, a project shipped as a binary), and the internal code of published packages (tests, `src/test-setup.ts`, config files, build scripts).
+- Everything else can and should use bun APIs: repos not published to npm (a `"private": true` app, a project shipped as a binary), and the internal code of published packages (tests, `src/test-setup.ts`, `bask.ts`, config files, build scripts).
 - A repo whose runtime genuinely has to be node (e.g. a dependency with a native module that doesn't load under bun, run from a `node:*` image with a `node` entrypoint) keeps node APIs in the code node runs. bun is still its package manager, and its `bunfig.toml` and Dockerfile rules still apply.
 
 **`execa` is the exception to `$`.** Plain shell-outs use bun's `$`. `execa` is fine where the call needs what `$` doesn't do well, like a test harness that needs `preferLocal`, `extendEnv: false`, or merged `all` output. A shipped CLI in a published package can also use it, since it's node-compatible. Don't use `execa` just to set a `cwd` or run a single command, since `` $`...`.cwd(dir) `` covers that.
@@ -624,9 +654,9 @@ declare module "bun:test" {
 
 ### Commands and containers
 
-**Commands are spelled out in full.** Anywhere a command is invoked (a justfile recipe, a workflow step, a `Dockerfile`, the `prepare` script, a `.sh` helper), write the long form for project tooling (`bun`, `just`, `tofu`, `gh`, `docker`, `git`, and the local devDependency bins). That means the full subcommand name, never an alias (`bun install`, not `bun i`, and `bun remove`, not `bun rm`), and the full flag name where one exists (`--production`, not `-p`, and `--file`, not `-f`). Normalize any abbreviated command the repo already has. POSIX and shell utilities (`rm -rf`, `ls`, `grep -q`, `curl -LsSf`, `mkdir -p`) are exempt. Their short flags are idiomatic, and some have no portable long form (BSD `rm` on macOS has none). This is about readability in the repo's own checked-in files, so it does not apply to commands you only run in the shell yourself, or to recipes inherited from the base justfile (see Invariants).
+**Commands are spelled out in full.** Anywhere a command is invoked (a bask task, a workflow step, a `Dockerfile`, the `prepare` script, a `.sh` helper), write the long form for project tooling (`bun`, `bask`, `tofu`, `gh`, `docker`, `git`, and the local devDependency bins). That means the full subcommand name, never an alias (`bun install`, not `bun i`, and `bun remove`, not `bun rm`), and the full flag name where one exists (`--production`, not `-p`, and `--list`, not `-l`). Normalize any abbreviated command the repo already has. POSIX and shell utilities (`rm -rf`, `ls`, `grep -q`, `curl -LsSf`, `mkdir -p`) are exempt. Their short flags are idiomatic, and some have no portable long form (BSD `rm` on macOS has none). This is about readability in the repo's own checked-in files, so it does not apply to commands you only run in the shell yourself, or to tasks inherited from the base (see Invariants).
 
-**`bun` over `bunx`.** Anything local (a devDependency's bin, a script in the repo) runs as `bun <command>`, never `bunx <command>`. `bunx` is for non-local invocations only, i.e. a package that isn't a dependency and gets fetched on the fly (the base justfile's `bunx npm-check-updates`, or a one-off code generator like `bunx openapi-typescript`). Rewrite any `bunx <local-bin>` the repo has to `bun <local-bin>`.
+**`bun` over `bunx`.** Anything local (a devDependency's bin, a script in the repo) runs as `bun <command>`, never `bunx <command>`. `bunx` is for non-local invocations only, i.e. a package that isn't a dependency and gets fetched on the fly (the base `bump-deps` task's `bunx npm-check-updates`, or a one-off code generator like `bunx openapi-typescript`). Rewrite any `bunx <local-bin>` the repo has to `bun <local-bin>`. The one exception is `bunx bask`: `bun bask` runs `bask.ts` instead of the bask bin (see bask.ts).
 
 **Dockerfiles.** bun is the package manager in every container build, and the npm boundary doesn't apply here (this is build/deploy tooling, not shipped code, so use bun even in a published repo).
 
@@ -640,16 +670,16 @@ declare module "bun:test" {
   `bunfig.toml` is the one that gets forgotten, and leaving it out silently changes behavior rather than failing: the install loses `[install] linker = "isolated"` and the run loses `[run] bun = true`, so the container resolves and executes differently from the dev machine. A stage that neither installs nor runs with bun (a runtime stage that only `COPY --from`s `node_modules` and executes with node) needs `package.json` alone.
 
 - Everything else is copied by name (`COPY src ./src`, `COPY tsconfig.json ./`), never with `COPY . .`, so the build context's `node_modules/`, `.env`, and `.git` can't leak into the image. With explicit copies a `.dockerignore` is optional.
-- A build stage that runs a `just` recipe (e.g. `just build-site`) copies the binary in with `COPY --from=ghcr.io/casey/just:latest /just /usr/local/bin/` rather than installing it another way.
-- An image's `bun install` needs `--ignore-scripts`, since `prepare` runs `just prepare` (git hooks and config syncs off devDependencies) and can't work in a container. Where `--ignore-scripts` would also skip a *needed* install script (a native module like better-sqlite3), `RUN bun pm pkg delete scripts.prepare` before a plain `bun install` instead.
+- A build stage that runs a bask task (e.g. `bunx bask build-site`) copies `bask.ts` along with what the task reads, and installs devDependencies, because bask and the base tasks come from the install. Nothing else installs bask.
+- An image's `bun install` needs `--ignore-scripts`, since `prepare` runs `bunx bask prepare` (git hooks and config syncs off devDependencies) and can't work in a container. Where `--ignore-scripts` would also skip a *needed* install script (a native module like better-sqlite3), `RUN bun pm pkg delete scripts.prepare` before a plain `bun install` instead.
 
 **Stable bun.** Every project tracks the latest stable bun, never canary or a pinned version: `oven/bun:latest` in a Dockerfile (never `oven/bun:canary`), and a workflow that sets up bun itself uses `oven-sh/setup-bun@v2` with no `with: bun-version:` block (the action's default is stable). The three reusable workflows already do this, so a repo on the thin wrappers has nothing to change. A file that pins the bun version (`.bun-version`, or a bun entry in `.tool-versions` or `mise.toml`) is deleted, or loses just that entry if it pins other tools too.
 
 ## Migrating from older setups
 
-End state: **for every role the target stack owns, exactly one tool fills it.** bun is the only package manager (`bun.lock` the only lockfile) and the only test runner, oxlint + oxfmt the only lint/format tooling, lefthook the only git-hook mechanism, commitlint the only commit-message tooling, `.release-it.ts` + `release-it-git-cliff` the only release/changelog config, the justfile the only home for scripts (`package.json` keeps only `prepare`, see Scripts), the three wrapper workflows (plus a deploy job) the only CI, and `update-deps.yml` the only dependency-update mechanism.
+End state: **for every role the target stack owns, exactly one tool fills it.** bun is the only package manager (`bun.lock` the only lockfile) and the only test runner, oxlint + oxfmt the only lint/format tooling, lefthook the only git-hook mechanism, commitlint the only commit-message tooling, `.release-it.ts` + `release-it-git-cliff` the only release/changelog config, bask the only task runner and `bask.ts` the only home for scripts (`package.json` keeps only `prepare`, see Scripts), the three wrapper workflows (plus a deploy job) the only CI, and `update-deps.yml` the only dependency-update mechanism.
 
-Anything else that fills one of those roles gets deleted, whatever tool it came from and whether or not this doc names it: old tool configs (`biome.json`, `vitest.config.ts`, a prettier config), any lockfile other than `bun.lock` (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `lock.yaml`), hook directories (`.githooks/`, a husky setup), any other workflow that builds, tests, lints, or releases (e.g. a `test.yml`), a renovate or dependabot config, release configs (including a `"release-it"` key in `package.json`, which conflicts with `.release-it.ts`), stale `package.json` scripts, and the matching devDependencies. A file that mixes stack-related lines with unrelated ones (say a `.gitattributes` with an entry for old hook scripts next to real rules) loses only the stack-related lines, and is deleted entirely only when nothing unrelated remains.
+Anything else that fills one of those roles gets deleted, whatever tool it came from and whether or not this doc names it: old tool configs (`biome.json`, `vitest.config.ts`, a prettier config), any lockfile other than `bun.lock` (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `lock.yaml`), hook directories (`.githooks/`, a husky setup), another task runner's file (a `justfile`, `Makefile`, or `Taskfile.yml` holding the repo's scripts), any other workflow that builds, tests, lints, or releases (e.g. a `test.yml`), a renovate or dependabot config, release configs (including a `"release-it"` key in `package.json`, which conflicts with `.release-it.ts`), stale `package.json` scripts, and the matching devDependencies. A file that mixes stack-related lines with unrelated ones (say a `.gitattributes` with an entry for old hook scripts next to real rules) loses only the stack-related lines, and is deleted entirely only when nothing unrelated remains.
 
 - Disable comments for a tool that's no longer in the stack (e.g. `biome-ignore`) are deleted, or converted to `// oxlint-disable-next-line <rule>` if oxlint flags the same line.
 - An `.npmrc` stays only if it holds real config (registry, auth). An empty or install-churn-only one is deleted.
@@ -659,13 +689,19 @@ The items below need extra care, because each one is easy to mistake for target 
 
 ### Leftovers from older `@adamhl8/configs`
 
+- **The justfile (`@adamhl8/configs` below 3).** v3 removed the base justfile (`justfile.base.just`) in favor of the base bask tasks, so a repo's `justfile` breaks on the bump. Delete it (and any other `*.just` file) and write `bask.ts` (see bask.ts):
+  - Each repo-specific recipe becomes an exported task (`build-binaries` -> `export const buildBinaries`). A `[private]` recipe becomes a hidden task, or a plain function if it only feeds a hook.
+  - Each `_recipe` extension becomes hooks on the base task. Dependencies listed before the `_recipe` become `.before(...)`. Extra body lines and dependencies after `&&` become `.after(...)`.
+  - A shebang recipe body (`#!/usr/bin/env bash` and a shell loop) becomes TypeScript in the task, using bun APIs (`Glob` instead of a shell `for`, `bun.file` instead of `cat`).
+  - Every `just <recipe>` becomes `bunx bask <task>`: the `prepare` script, `.release-it.ts` hooks, lefthook commands, repo workflow steps, Dockerfiles, `.sh` helpers, and the README.
+  - Delete `ignoreBinaries: ["just"]` from `knip.ts` (the base no longer needs it) and any `entry: ["bask.ts"]` override (the base has it). Delete anything that installs just: a `taiki-e/install-action@just` step, a `COPY --from=ghcr.io/casey/just` line.
 - **The old `setup` release input.** The reusable `release.yml` input for pre-release commands was renamed `before-release`. Rename any `setup:` under a `release.yml` job's `with:`.
-- **`adamhl8-cliff` leftovers.** The bin was removed from `@adamhl8/configs` when the `release-it-git-cliff` plugin replaced it. Grep for `adamhl8-cliff` (justfile recipes, `.release-it.ts` hooks, README, scripts) and delete each use. Changelog and release notes now come from the plugin. To preview the next version, call `git-cliff` directly with the bundled config (see Verify green). Also delete a per-repo `cliff.toml` (the plugin uses the bundled config).
+- **`adamhl8-cliff` leftovers.** The bin was removed from `@adamhl8/configs` when the `release-it-git-cliff` plugin replaced it. Grep for `adamhl8-cliff` (justfile recipes or bask tasks, `.release-it.ts` hooks, README, scripts) and delete each use. Changelog and release notes now come from the plugin. To preview the next version, call `git-cliff` directly with the bundled config (see Verify green). Also delete a per-repo `cliff.toml` (the plugin uses the bundled config).
 - **The dead config-merge APIs.** `fooConfig(cfg, { arrays: "replace" })` (an options object) and `fooConfig({ key: { value: [...], mode: "replace" } })` (a per-key wrapper) were both valid in earlier `@adamhl8/configs` versions. Neither works now: the second argument is read as a config (see fact 1), so an `{ arrays: "replace" }` left in place silently sets a bogus `arrays` key instead of switching merge mode. Grep every config file for `arrays:` and `mode:` and rewrite to the two-config form.
-- **Overrides for things the base now allows.** `reportUnusedDisableDirectives` already makes lint fail on a stale inline disable. What lint doesn't flag is a `rules`/`overrides` entry in `oxlint.config.ts` for `no-template-curly-in-string` on `.release-it.ts`, `node/no-top-level-await`, `one-var`, or named-export function declarations in `.tsx` (see fact 2). Delete each one.
+- **Overrides for things the base now allows.** `reportUnusedDisableDirectives` already makes lint fail on a stale inline disable. What lint doesn't flag is a `rules`/`overrides` entry in `oxlint.config.ts` for `no-template-curly-in-string` on `.release-it.ts`, `clean-modules/require-direct-exports` or `import/export` on `bask.ts`, `node/no-top-level-await`, `one-var`, or named-export function declarations in `.tsx` (see fact 2). Delete each one.
 - **Repo-local release jobs.** A docker build/push or asset-upload job in the repo's `release.yml` is superseded by the `docker-image` input or release-it hooks (see GitHub Actions and .release-it.ts). Delete the job.
 - **A `ci.yml` without the `edited` trigger.** A wrapper whose `pull_request:` has no `types` never re-lints a retitled PR. Add the `types` list shown in GitHub Actions.
-- **Checks the base now runs.** `just lint` runs `just --fmt`, `tofu fmt`, and `actionlint`, and the reusable `ci.yml` lints the PR title. Delete a repo's own recipe, hook command, or workflow step that does the same (e.g. an `actionlint` job or a PR-title lint action).
+- **Checks the base now runs.** `bunx bask lint` runs `tofu fmt` and `actionlint`, and the reusable `ci.yml` lints the PR title. Delete a repo's own task, hook command, or workflow step that does the same (e.g. an `actionlint` job or a PR-title lint action). A repo-local `just --fmt` step goes away with the justfile.
 
 ## Apply & verify
 
@@ -685,17 +721,17 @@ Read `package.json`, `tsconfig.json`, whatever configs are present, and the `src
 In this order (some steps are order-sensitive):
 
 1. Apply everything in Migrating from older setups that the baseline turned up.
-2. Write everything in Files that must exist and the `package.json` edits (the `imports` map, and any missing devDependency at its listed range). Leave existing dependency versions alone, because step 3 bumps them. Apply every Code convention that lint doesn't autofix (everything under bun and Commands and containers), minding Where bun APIs stop. Leave subpath imports, import extensions, and direct exports to the autofix in step 5.
-3. `bun install`, then **immediately** run `just bump-deps` **twice**, even if the repo looked fully migrated at baseline (this step is never skipped). Every later step assumes deps are already at their newest.
+2. Write everything in Files that must exist and the `package.json` edits (the `imports` map, the `prepare` script, and any missing devDependency at its listed range). Leave existing dependency versions alone, because step 3 bumps them, except an `@adamhl8/configs` below 3, which goes to `^3.0.3` now (see devDependencies). Apply every Code convention that lint doesn't autofix (everything under bun and Commands and containers), minding Where bun APIs stop. Leave subpath imports, import extensions, and direct exports to the autofix in step 5.
+3. `bun install`, then **immediately** run `bunx bask bump-deps` **twice**, even if the repo looked fully migrated at baseline (this step is never skipped). Every later step assumes deps are already at their newest.
 
-   `bump-deps` runs `bunx npm-check-updates --upgrade`, which goes past the ranges in `package.json` and rewrites them (this, not the plain install, is what moves `@adamhl8/configs` past the `^2.8.0` floor to whatever is newest), then reinstalls from scratch (`rm -f bun.lock`, `rm -rf node_modules/`, `bun install --no-cache`). The reinstall runs lifecycle scripts, so `prepare` -> `just prepare` -> `lefthook install` + `tofu init` + the `.gitignore` and `bunfig.toml` syncs all happen as part of it (watch for a `sync hooks` line confirming the `pre-commit`/`commit-msg` hooks were installed).
+   `bump-deps` runs `bunx npm-check-updates --upgrade`, which goes past the ranges in `package.json` and rewrites them (this, not the plain install, is what moves `@adamhl8/configs` past the `^3.0.3` floor to whatever is newest), then reinstalls from scratch (`rm -f bun.lock`, `rm -rf node_modules/`, `bun install --no-cache`). The reinstall runs lifecycle scripts, so `prepare` -> `bunx bask prepare` -> `lefthook install` + `tofu init` + the `.gitignore` and `bunfig.toml` syncs all happen as part of it (watch for a `sync hooks` line confirming the `pre-commit`/`commit-msg` hooks were installed).
 
-   The first pass runs against the `@adamhl8/configs` that `bun install` resolved, so it can bring in a newer base justfile (and newer tooling) than the one it executed with. The second pass runs under the new base with everything already in place. It must succeed and must be a no-op (nothing left to upgrade): if it fails or still upgrades something, the first pass hadn't settled, so fix what it reports and run it again until a pass is clean.
+   The first pass runs against the `@adamhl8/configs` that `bun install` resolved, so it can bring in newer base tasks (and newer tooling) than the ones it executed with. The second pass runs under the new base with everything already in place. It must succeed and must be a no-op (nothing left to upgrade): if it fails or still upgrades something, the first pass hadn't settled, so fix what it reports and run it again until a pass is clean.
 
    The reinstall writes `bun.lock` with current stable bun, so expect its `"lockfileVersion"` line to change (a `1` becomes `2`). Don't hand-edit the lockfile.
 
    Once the marker line is in `.gitignore`, dedupe below it, and clean up `bunfig.toml` against the base (see Synced files).
-4. Tofu. The repo's Actions secrets (see Actions secrets) and settings are not pushed by hand: `tofu apply` on `github.tofu` manages them. Your part is setup and review only, and the apply itself is mine (see Invariants). `just prepare` already ran `tofu init`, so from the repo root:
+4. Tofu. The repo's Actions secrets (see Actions secrets) and settings are not pushed by hand: `tofu apply` on `github.tofu` manages them. Your part is setup and review only, and the apply itself is mine (see Invariants). `bunx bask prepare` already ran `tofu init`, so from the repo root:
 
    1. Import the existing repo into state. Skip this if `tofu state list` already shows `module.github.github_repository.current` (a re-run: importing twice fails with "Resource already managed"). Also skip it if the repo doesn't exist on GitHub yet (Baseline (f)), because the module creates it on apply:
 
@@ -706,13 +742,13 @@ In this order (some steps are order-sensitive):
    2. `tofu plan`, and include what it wants to change (repo settings, Actions permissions, secrets) in the report. Check its output for stale secrets (see Stale secrets). Do NOT run `tofu apply`.
 
    None of this setup triggers a release: `ci.yml` runs only on pushes/PRs, `release.yml` is `workflow_dispatch`-only, and `update-deps.yml` runs weekly (or manual dispatch) and only ever opens a PR.
-5. `just lint` until clean. Apply autofixes, fix remaining oxlint errors in the code (suppressing only per the order in fact 2), resolve knip findings (unused deps/exports/files), fix actionlint findings in the repo's workflows, and re-run. Expect formatting churn (markdown reflow from oxfmt, plus `just --fmt` and `tofu fmt`), and expect the import rules to need more than one pass to converge. The base enables oxlint's `typeAware` and `typeCheck` options, so oxlint-tsgolint reports TypeScript errors too, and a clean lint is a full type check (this is why there's no standalone `tsc --noEmit` script).
+5. `bunx bask lint` until clean. Apply autofixes, fix remaining oxlint errors in the code (suppressing only per the order in fact 2), resolve knip findings (unused deps/exports/files), fix actionlint findings in the repo's workflows, and re-run. Expect formatting churn (markdown reflow from oxfmt, plus `tofu fmt`), and expect the import rules to need more than one pass to converge. The base enables oxlint's `typeAware` and `typeCheck` options, so oxlint-tsgolint reports TypeScript errors too, and a clean lint is a full type check (this is why there's no standalone `tsc --noEmit` script).
 
-   knip's **configuration hints** (e.g. a `project`/`ignore` pattern that no longer matches anything) do not fail the run: knip prints them and still exits 0, so `just lint` looks clean. Treat them as errors anyway. Fix each one (usually by dropping a stale entry from `knip.ts`), and if one can't be resolved, surface it in the report instead of letting it pass silently.
+   knip's **configuration hints** (e.g. a `project`/`ignore` pattern that no longer matches anything) do not fail the run: knip prints them and still exits 0, so `bunx bask lint` looks clean. Treat them as errors anyway. Fix each one (usually by dropping a stale entry from `knip.ts`), and if one can't be resolved, surface it in the report instead of letting it pass silently.
 
 ### Stale secrets
 
-`no_unmanaged_secrets` is a tofu `check` block, so an undeclared Actions secret on the repo shows up as a **warning**, not a failure: the plan still succeeds, and the warning alone doesn't make `just tofu-check` fail. Its `-compact-warnings` also hides the message, so read the output of the plain `tofu plan` from Apply step 4 for `Unmanaged secrets on '<repo>': <NAMES>`. For each name:
+`no_unmanaged_secrets` is a tofu `check` block, so an undeclared Actions secret on the repo shows up as a **warning**, not a failure: the plan still succeeds, and the warning alone doesn't make `bunx bask tofu-check` fail. Its `-compact-warnings` also hides the message, so read the output of the plain `tofu plan` from Apply step 4 for `Unmanaged secrets on '<repo>': <NAMES>`. For each name:
 
 - If the repo genuinely needs it, declare it via the `actions_secrets` flags or `additional_secrets` (its value must exist in `~/homelab/secrets/credentials.yaml` under the lowercased name).
 - Otherwise it's stale (the common case is a leftover `NPM_CI_TOKEN` on a `"private": true` repo). Do NOT delete it. List it in the report with the command for me to run: `gh secret delete <NAME> --repo <owner/name>`. The exception is a secret the plan also destroys (one `github.tofu` used to declare, like a dropped `NPM_CI_TOKEN = true`): my apply removes it, so report it as a planned change with no delete command.
@@ -721,13 +757,14 @@ In this order (some steps are order-sensitive):
 
 Without releasing:
 
-- `just` (bare) lists the base recipes and then prints the commit types, confirming the justfile import resolves. The reusable CI depends on this (`ci.yml` runs `just build`).
-- `just build` passes: lint (including `bun test`, which passes with no tests via `--pass-with-no-tests`), then tsdown (with publint for a built published package, and attw for a typed library), then `tofu-check`. While the plan has pending changes `tofu-check` fails (see Invariants): confirm everything before it passed, and note it. The output has no knip configuration hints (they exit 0, so check the output, not just the exit code).
-- A second `just build` changes no files (compare `git status --porcelain` and `git diff` before and after). Every untracked file `git status` lists is one to commit, and build output is gitignored. CI's `build` fails on either.
+- `bunx bask` (bare) lists the base tasks and then prints the commit types, confirming `bask.ts` loads the base. The reusable CI depends on this (`ci.yml` runs `bunx bask build`).
+- No just is left: no `justfile` or `*.just` file is tracked, and `git grep -nw just` shows no task-runner use (a `just <recipe>` call, a just install step). Hits in plain prose are fine.
+- `bunx bask build` passes: lint (including `bun test`, which passes with no tests via `--pass-with-no-tests`), then tsdown (with publint for a built published package, and attw for a typed library), then `tofu-check`. While the plan has pending changes `tofu-check` fails (see Invariants): confirm everything before it passed, and note it. The output has no knip configuration hints (they exit 0, so check the output, not just the exit code).
+- A second `bunx bask build` changes no files (compare `git status --porcelain` and `git diff` before and after). Every untracked file `git status` lists is one to commit, and build output is gitignored. CI's `build` fails on either.
 - `tofu plan` runs without errors and shows only the expected changes. It shows no `Unmanaged secrets` warning, or every name it shows is either declared or in the report.
 - The Actions secrets match the Actions secrets table for this repo: confirm pending additions and removals in the `tofu plan` output, and the ones already applied with `gh secret list --repo <owner/name>`.
 - `.git/hooks/pre-commit` and `.git/hooks/commit-msg` are lefthook-managed (their contents reference lefthook), and `lefthook validate` succeeds.
-- Release tooling sanity-checks: `release-it-git-cliff` is a direct devDependency and resolves from the repo root (`bun --print 'import.meta.resolve("release-it-git-cliff")'`), `git-cliff --config node_modules/@adamhl8/configs/dist/configs/cliff.base.toml --bumped-version` prints a version, and all three workflow files exist. Do NOT run `just release` / `just release-run` / `gh workflow run release.yml`.
+- Release tooling sanity-checks: `release-it-git-cliff` is a direct devDependency and resolves from the repo root (`bun --print 'import.meta.resolve("release-it-git-cliff")'`), `git-cliff --config node_modules/@adamhl8/configs/dist/configs/cliff.base.toml --bumped-version` prints a version, and all three workflow files exist. Do NOT run `bunx bask release` / `bunx bask release-run` / `gh workflow run release.yml`.
 
 ### Report and stop
 
@@ -736,10 +773,10 @@ Leave every change uncommitted. The report covers:
 - What changed.
 - What was skipped (e.g. no tests).
 - Decisions made (suppressions and overrides, manual fixes).
-- What `tofu plan` wants to change, pending my apply, and whether `tofu-check` (and so `just build` and the pre-commit hook) fails until then.
+- What `tofu plan` wants to change, pending my apply, and whether `tofu-check` (and so `bunx bask build` and the pre-commit hook) fails until then.
 - Stale Actions secrets, each with its `gh secret delete <NAME> --repo <owner/name>` command (except one the plan already destroys).
 - The `bun.lock` `lockfileVersion` change, if any.
 - Anything that couldn't be resolved (a knip configuration hint, a lint rule that needed judgment).
 - Anything the spec doesn't cover, or where the repo seems to diverge on purpose (e.g. an archetype or package shape the tables don't list). Report it rather than forcing it into the nearest fit.
 
-The lefthook `commit-msg` (commitlint) and `pre-commit` (`just build`) hooks are now installed, so a later commit needs a conventional message (`just commit-types` lists the allowed types), files `just build` leaves unchanged, and a drift-free tofu state.
+The lefthook `commit-msg` (commitlint) and `pre-commit` (`bunx bask build`) hooks are now installed, so a later commit needs a conventional message (`bunx bask commit-types` lists the allowed types), files `bunx bask build` leaves unchanged, and a drift-free tofu state.
