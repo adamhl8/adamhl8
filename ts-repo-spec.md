@@ -35,7 +35,7 @@ This document specifies the repo's target state: the rules that apply throughout
         rules: { "node/no-process-env": "off" },
       },
     ],
-  })
+  });
   ```
 
 - **oxfmt formats the code blocks in Markdown too.** A block it would break (a deliberately badly formatted example in a README, or one whose order matters) takes `<!-- oxfmt-ignore -->` on the line before it.
@@ -81,7 +81,7 @@ Create these verbatim. Each snippet shows the default, with no overrides. A repo
 ### bask.ts
 
 ```ts
-export * from "@adamhl8/configs/bask"
+export * from "@adamhl8/configs/bask";
 ```
 
 That one line provides the base tasks (see bask tasks in the configs README), and bare `bask` lists them. Tasks run as `bask <task>`, and a task's name is its export name in kebab-case (`bask bump-deps` runs `bumpDeps`). Two things about them matter here:
@@ -98,23 +98,23 @@ Repo-specific scripts are extra exported tasks below the `export *` (see Scripts
 ### oxlint.config.ts
 
 ```ts
-import { oxlintConfig } from "@adamhl8/configs"
-import { defineConfig } from "oxlint"
+import { oxlintConfig } from "@adamhl8/configs";
+import { defineConfig } from "oxlint";
 
-const config = oxlintConfig()
+const config = oxlintConfig();
 
-export default defineConfig(config)
+export default defineConfig(config);
 ```
 
 ### oxfmt.config.ts
 
 ```ts
-import { oxfmtConfig } from "@adamhl8/configs"
-import { defineConfig } from "oxfmt"
+import { oxfmtConfig } from "@adamhl8/configs";
+import { defineConfig } from "oxfmt";
 
-const config = oxfmtConfig()
+const config = oxfmtConfig();
 
-export default defineConfig(config)
+export default defineConfig(config);
 ```
 
 **Tailwind.** Both bases find a Tailwind project's stylesheet on their own. Override it only when detection picks the wrong file, and then in both configs together (see oxfmt and oxlint in the configs README).
@@ -122,22 +122,30 @@ export default defineConfig(config)
 ### commitlint.config.ts
 
 ```ts
-import { commitlintConfig } from "@adamhl8/configs"
+import { commitlintConfig } from "@adamhl8/configs";
 
-const config = commitlintConfig()
+const config = commitlintConfig();
 
-export default config
+export default config;
 ```
 
 ### knip.ts
 
 ```ts
-import { knipConfig } from "@adamhl8/configs"
+import { knipConfig } from "@adamhl8/configs";
 
-const config = knipConfig()
+const config = knipConfig();
 
-export default config
+export default config;
 ```
+
+**Leaving files out.** knip has three ways to treat a file it shouldn't report on, and each fits a different case. Check every one the repo's `knip.ts` uses against these, and move it to the right one:
+
+- **A negated `project` glob** takes a file out of the analysis entirely. It's for files that aren't the repo's own source, like a committed build output. Gitignored files are already out, so they need none. Put it in the first config, so it appends to the base's own negations (a `project` in the second config replaces them).
+- **An `entry`** is for a file that belongs to the project but that nothing imports, so knip can't see it's used: a stylesheet a CLI loads, an ambient type augmentation, a script run by path. knip still analyzes it and follows its imports.
+- **`ignore`** keeps a file in the analysis but hides its issues. It's only for a file whose imports knip must still follow but whose own issues aren't the repo's to fix, like a generated client (`src/generated/**`). knip's docs say to avoid it otherwise. When only one kind of issue is the problem, a narrower option (`ignoreIssues`, `ignoreExportsUsedInFile`, `ignoreDependencies`) fits better.
+
+The wrong choice still passes lint: an `ignore` or a negated glob on the repo's own code hides real findings.
 
 ### lefthook.yaml
 
@@ -157,11 +165,11 @@ No `paths` block (see Modules).
 ### .release-it.ts
 
 ```ts
-import { releaseItConfig } from "@adamhl8/configs"
+import { releaseItConfig } from "@adamhl8/configs";
 
-const config = releaseItConfig()
+const config = releaseItConfig();
 
-export default config
+export default config;
 ```
 
 The base registers the `release-it-git-cliff` plugin with a git-cliff config bundled in `@adamhl8/configs`, so there is no per-repo `cliff.toml`. The plugin must be a direct devDependency of the repo (see devDependencies): with bun's isolated linker, release-it can't see a copy that exists only under `@adamhl8/configs`.
@@ -177,7 +185,7 @@ const config = releaseItConfig({
   github: {
     assets: ["bin/<name>-*"],
   },
-})
+});
 ```
 
 ### tsdown.config.ts
@@ -186,12 +194,12 @@ Only for a repo that builds something (see Repo archetypes). Three factories, pi
 
 ```ts
 // a typed library: unbundled, with type declarations, attw, and publint. `platform` is required.
-import { tsdownConfig } from "@adamhl8/configs"
-import { defineConfig } from "tsdown"
+import { tsdownConfig } from "@adamhl8/configs";
+import { defineConfig } from "tsdown";
 
-const config = tsdownConfig({ platform: "node" })
+const config = tsdownConfig({ platform: "node" });
 
-export default defineConfig(config)
+export default defineConfig(config);
 ```
 
 - `tsdownConfig`: a **published package that builds**. Requires `platform`: `"node"` by default, or `"neutral"` for a library whose shipped code uses no runtime APIs at all (pure logic that runs on node, bun, or in a browser). Its options depend on the package's shape (see Published package shapes).
