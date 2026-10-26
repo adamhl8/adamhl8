@@ -11,24 +11,11 @@ This document specifies the repo's target state: the rules that apply throughout
 - **Do not commit.** Leave every change uncommitted (staged or unstaged is fine) so the diff can be reviewed.
 - **Global tools and credentials are assumed installed.** They are never devDependencies. If one is missing, stop and report.
 - **Scope: the repo's own files.** Anything shipped by `@adamhl8/configs` (the base tasks, the reusable workflows and their setup action, the base configs) is out of scope. Don't override or copy it just to make it conform to a rule here.
-- **Use judgment, not inertia.** Don't keep something just because the repo has it. Clean up what the target doesn't need, even when no tool flags it (an `as const` on a factory argument, an override the base already covers). Raise those decisions in the report.
+- **Use judgment, not inertia.** Don't keep something just because the repo has it. Clean up what the target doesn't need, even when no tool flags it (an `as const` on a factory argument). Raise those decisions in the report.
+- **Check `@adamhl8/configs` for what's new.** It keeps evolving, so before migrating, look for new features or changes that affect this repo. Its README (`node_modules/@adamhl8/configs/README.md`) and its base files (`node_modules/@adamhl8/configs/dist/configs/`) show what it currently provides. Prefer what it provides over hand-rolled code or other dependencies.
 - **Prefer `@adamhl8/configs` defaults.** Call each factory with no arguments, and make the smallest change that makes the tooling pass. Add an argument only when this spec calls for one or a lint failure clearly does.
-- **Every factory is a deep merge, and the second argument is a second config.** `fooConfig(userConfig)` deep-merges your config into the base, and arrays append to the base array. To use an array as-is instead, put it in a second config object, which merges the same way except its arrays replace the base array:
-
-  ```ts
-  const config = knipConfig(
-    {
-      // appended to the base ignoreBinaries
-      ignoreBinaries: ["fd"],
-    },
-    {
-      // used as-is, replacing the base project globs
-      project: ["src/**/*.ts"],
-    },
-  )
-  ```
-
-  Only the arrays you name are replaced, sibling keys still merge normally, and a key present in both gets the second config's value. Required keys (e.g. `platform` for `tsdownConfig`) go in the first config. Assign the result to `const config` on its own line and `export default` the `config` separately.
+- **Every factory is a deep merge** (see Config merging in the configs README). Assign the result to `const config` on its own line and `export default` the `config` separately.
+- **Compare each config to its base.** Every config built on a configs base (a factory config, or a synced file like `bunfig.toml`) gets compared with its base file. Remove what the base already covers and what overrides it by accident, keeping only what's genuinely repo-specific. A synced file stores the base values from its last sync as its own, and the repo's values win, so a newer base value never replaces an older one by itself. Delete the stale key, then run `bask prepare` again to pick up the current base.
 
 - **Self-dependent packages.** A package that the shared tooling loads by name (a release-it plugin, bask, the configs package itself) depends on itself (`"file:."`) so it can self-install. Such a repo may build before the self-install, through its own `prepare` setup or `bunfig.toml` settings. Those are intentional: leave them alone.
 - **The oxlint base is strict, and it forces real code changes.** Expect to fix code, not just to accept autofixes. When a rule genuinely doesn't fit, suppress it as narrowly as the hits allow:
@@ -97,10 +84,10 @@ Create these verbatim. Each snippet shows the default, with no overrides. A repo
 export * from "@adamhl8/configs/bask"
 ```
 
-That one line provides the base tasks, and bare `bask` lists them. Tasks run as `bask <task>`, and a task's name is its export name in kebab-case (`bask bump-deps` runs `bumpDeps`). The two this spec relies on:
+That one line provides the base tasks (see bask tasks in the configs README), and bare `bask` lists them. Tasks run as `bask <task>`, and a task's name is its export name in kebab-case (`bask bump-deps` runs `bumpDeps`). Two things about them matter here:
 
-- `build` runs `lint` (which also runs the tests), then `tsdown` when `tsdown.config.ts` exists, then `tofu-check`. In CI it also fails if the run changed or created any file, so everything the install, `prepare`, lint, and tsdown write must be committed exactly as they leave it, or be gitignored.
-- `bump-deps` upgrades every dependency to its newest, past the ranges in `package.json`, then reinstalls from scratch (see Apply step 3). It runs npm-check-updates, so a repo's `.ncurc.yml` (e.g. a `reject` pin) is real config: keep it.
+- In CI, `build` fails if the run changed or created any file, so everything the install, `prepare`, lint, and tsdown write must be committed exactly as they leave it, or be gitignored.
+- `bump-deps` runs npm-check-updates, so a repo's `.ncurc.yml` (e.g. a `reject` pin) is real config: keep it.
 
 Repo-specific scripts are extra exported tasks below the `export *` (see Scripts). A repo that changes a base task extends it with a hook instead of redefining it or copying its body. To write a task or a hook, or to convert a justfile, read the bask README (`node_modules/@adamhl8/bask/README.md`). On top of what it says:
 
@@ -130,15 +117,7 @@ const config = oxfmtConfig()
 export default defineConfig(config)
 ```
 
-**Tailwind.** For a project with a `tailwindcss` dependency, the base finds its stylesheet on its own: the first CSS file, in sorted path order, that imports `tailwindcss`. oxfmt sorts classes against it (`sortTailwindcss`), and oxlint loads `oxlint-tailwindcss` with it as `settings.tailwindcss.entryPoint`. Override both only when detection picks the wrong file, and then together:
-
-```ts
-const config = oxfmtConfig({ sortTailwindcss: { stylesheet: "src/styles/global.css" } })
-```
-
-```ts
-const config = oxlintConfig({ settings: { tailwindcss: { entryPoint: "src/styles/global.css" } } })
-```
+**Tailwind.** Both bases find a Tailwind project's stylesheet on their own. Override it only when detection picks the wrong file, and then in both configs together (see oxfmt and oxlint in the configs README).
 
 ### commitlint.config.ts
 
@@ -269,42 +248,13 @@ Other module inputs and behavior:
 
 ### .gitignore
 
-Not written by hand. The base `prepare` task keeps the shared ignore list at the top of the file above a marker line, and replaces everything above the marker on each run. Everything below the marker is left untouched and is where project-specific entries live:
-
-```gitignore
-node_modules/
-dist/
-.terraform
-.terraform.lock.hcl
-# The above patterns are managed by @adamhl8/configs. Anything manually added above this line will be replaced.
-
-# project-specific entries
-.env.local
-```
+Not written by hand. The base `prepare` task keeps the shared ignore list (`node_modules/@adamhl8/configs/dist/configs/gitignore.base`) at the top of the file above a marker line, and replaces everything above the marker on each run. Everything below the marker is left untouched and is where project-specific entries live.
 
 On the first sync the repo's entire old `.gitignore` lands below the marker, so clean up after it: delete every line below the marker that the managed block already covers (including equivalent spellings like `dist` without the slash), keeping only genuinely project-specific entries.
 
 ### bunfig.toml
 
-Committed, but not written by hand from scratch. The base `prepare` task deep-merges the shared base config into the repo's `bunfig.toml` and writes the result back. The repo's values win over the base's, and the file is regenerated from the merged config, so comments don't survive. The base:
-
-```toml
-[test]
-pathIgnorePatterns = ["fixtures/**", "fixture/**"]
-coverage = true
-coverageSkipTestFiles = true
-coveragePathIgnorePatterns = ["src/test-setup.ts"]
-concurrentTestGlob = "**/*.test.ts"
-onlyFailures = true
-
-[install]
-linker = "isolated"
-
-[run]
-bun = true
-```
-
-Repo-specific settings live in the same file and survive later syncs (e.g. `[test] preload = ["./src/test-setup.ts"]`, see Tests use `bun test`). Because the repo's values win, an old `bunfig.toml` can silently override the base, so clean up after the first sync: diff the file against `node_modules/@adamhl8/configs/dist/configs/bunfig.base.toml` and remove anything that overrides the base unintentionally (a `preload` pointing at a deleted file, a `coveragePathIgnorePatterns` that merely restates the base's), keeping only genuinely repo-specific settings.
+Committed, but not written by hand from scratch. The base `prepare` task deep-merges the shared base config (`node_modules/@adamhl8/configs/dist/configs/bunfig.base.toml`) into the repo's `bunfig.toml` and writes the result back. The repo's values win over the base's, and the file is regenerated from the merged config, so comments don't survive. Repo-specific settings live in the same file and survive later syncs (e.g. `[test] preload = ["./src/__tests__/test-setup.ts"]`, see Tests use `bun test`). Because the repo's values win, an old `bunfig.toml` can silently override the base (see Compare each config to its base).
 
 ### bun.lock
 
@@ -492,32 +442,12 @@ Every script lives in `bask.ts` (the standard ones come from the base, repo-spec
 
 ### devDependencies
 
-The repo must have every devDependency below that applies to it. Add a missing one with `bun add --dev <name>`, which writes its latest range. Leave the version of an existing one alone, because `bask bump-deps` moves every dependency to its newest (Apply step 3). The exception is `@adamhl8/configs` (see Apply step 2).
+The repo must have every devDependency that applies to it: `@adamhl8/configs` plus what Installation in the configs README lists. Add a missing one with `bun add --dev <name>`, which writes its latest range. Leave the version of an existing one alone, because `bask bump-deps` moves every dependency to its newest (Apply step 3). The exception is `@adamhl8/configs` (see Apply step 2). On top of what the README says:
 
-Always:
-
-```
-@adamhl8/configs
-@adamhl8/bask
-oxlint
-oxlint-tsgolint
-oxfmt
-@commitlint/cli
-@commitlint/config-conventional
-release-it
-release-it-git-cliff
-@types/bun (replaces @types/node, the base tsconfig sets types: ["bun"])
-knip
-typescript
-markdown-toc
-```
-
-Conditional:
-
-- `tsdown`: the repo builds (see Repo archetypes).
-- `publint`: a published package that builds.
-- `@arethetypeswrong/core`: a typed library (see Published package shapes).
-- `tailwint` and `@tailwindcss/language-server`: a Tailwind project with `.astro` files, because `lint` runs `tailwint` on them.
+- Every repo releases, so `release-it` and `release-it-git-cliff` always apply.
+- `tsdown` goes in any repo that builds (see Repo archetypes), bundles included.
+- `@arethetypeswrong/core` is only for a typed library (see Published package shapes).
+- `@types/bun` replaces `@types/node`.
 
 Notes:
 
@@ -549,16 +479,14 @@ Internal imports are `#` subpath imports (no slash after the `#`), backed by `"i
 **Where bun APIs stop.** `engines` decides (see Repo archetypes):
 
 - Under `engines.bun`, everything uses bun APIs.
-- Under `engines.node`, the code that has to work outside bun uses node APIs only. That's everything a published package ships in `dist/` (a shipped CLI included: `node:child_process`, or `execa` per the exception below, instead of `$` from `"bun"`), and the code a node runtime runs. bun is still the package manager, and the `bunfig.toml` and Dockerfile rules still apply.
-- The repo's internal code always uses bun APIs: tests, `src/test-setup.ts`, `bask.ts`, config files, build scripts.
+- Under `engines.node`, the code that has to work outside bun uses node APIs only. That's everything a published package ships in `dist/` (a shipped CLI included: `node:child_process` or `execa` instead of `$` from `"bun"`), and the code a node runtime runs. bun is still the package manager, and the `bunfig.toml` and Dockerfile rules still apply.
+- The repo's internal code always uses bun APIs: tests and test support, `bask.ts`, config files, build scripts.
 - A plugin loaded by a browser-like host (Obsidian, IINA) runs neither node nor bun, so its shipped code uses neither runtime's APIs.
-- A single tool that breaks under bun (e.g. a CLI that segfaults) runs under node in its task (`` sh`npx --yes <package>` ``), and the repo's code that the tool loads keeps node APIs. The rest of the repo stays on bun.
-
-**`execa` is the exception to `$`.** Plain shell-outs use bun's `$`. `execa` is fine where the call needs what `$` doesn't do well, like a test harness that needs `preferLocal`, `extendEnv: false`, or merged `all` output. A shipped CLI under `engines.node` can also use it. Don't use `execa` just to set a `cwd` or run a single command, since ``$`...`.cwd(dir)`` covers that.
+- A single tool that breaks under bun (e.g. a CLI that segfaults) runs under node in its task (`.bun(false)`, see the bask README), and the repo's code that the tool loads keeps node APIs. The rest of the repo stays on bun.
 
 **Shebangs.** An executable `.ts`/`.js` script's shebang is `#!/usr/bin/env bun`. A `.sh` helper keeps its POSIX shell shebang (`#!/usr/bin/env bash`, `#!/bin/sh`), because bun's shell isn't bash. Code that must run on node keeps `#!/usr/bin/env node`: a shipped `bin` under `engines.node`, and the scripts a node runtime runs. Rewrite every other node shebang (including the `-S` forms) to the bun one.
 
-**Tests use `bun test`** (only if the repo has tests). Tests import from `"bun:test"`, and test config lives in `bunfig.toml`'s `[test]` block (see bunfig.toml): there is no test config file. A test setup file is registered via `[test].preload = ["./src/test-setup.ts"]`, imports from `"bun:test"`, and registers custom matchers through `expect.extend`. Custom matcher types augment `"bun:test"`:
+**Tests use `bun test`** (only if the repo has tests). Tests import from `"bun:test"`, and test config lives in `bunfig.toml`'s `[test]` block (see bunfig.toml): there is no test config file. Test support code (a setup file, helpers, fixtures) lives under a `__tests__` dir, because the base's coverage skips those dirs. A test setup file is registered via `[test].preload = ["./src/__tests__/test-setup.ts"]`, imports from `"bun:test"`, and registers custom matchers through `expect.extend`. Custom matcher types augment `"bun:test"`:
 
 ```ts
 declare module "bun:test" {
@@ -615,7 +543,7 @@ In this order (some steps are order-sensitive):
 
 1. Apply everything in Migrating from older setups.
 2. Write everything in Files that must exist and the `package.json` edits. Leave existing dependency versions alone, except `@adamhl8/configs`, which goes to its latest version so the current base tasks exist. Do both in one command: `bun add --dev @adamhl8/configs@latest` plus every missing devDependency. Apply every Code convention that lint doesn't autofix (everything under bun and Commands and containers). Leave subpath imports, import extensions, and direct exports to the lint autofix in step 5.
-3. Run `bask bump-deps` **twice**, even if the repo looked fully migrated at baseline (this step is never skipped). The first pass runs under the base tasks that were installed, so it can bring in newer base tasks and tooling than the ones it ran with. The second pass runs under the new base, and must succeed and be a no-op. If it fails or still upgrades something, fix what it reports and run it again until a pass is clean. Then clean up `.gitignore` and `bunfig.toml` (see .gitignore and bunfig.toml).
+3. Run `bask bump-deps` **twice**, even if the repo looked fully migrated at baseline (this step is never skipped). The first pass runs under the base tasks that were installed, so it can bring in newer base tasks and tooling than the ones it ran with. The second pass runs under the new base, and must succeed and be a no-op. If it fails or still upgrades something, fix what it reports and run it again until a pass is clean. Then compare each config to its base (see Rules) and clean up `.gitignore` (see .gitignore).
 4. Tofu. The repo's Actions secrets and settings are not pushed by hand: `tofu apply` on `github.tofu` manages them, and the apply is mine (see Rules). `bask prepare` already ran `tofu init`, so from the repo root:
    1. Import the existing repo into state. Skip this if `tofu state list` already shows `module.github.github_repository.current` (a re-run: importing twice fails with "Resource already managed"). Also skip it if the repo doesn't exist on GitHub yet (see Baseline), because the module creates it on apply:
 
@@ -625,7 +553,7 @@ In this order (some steps are order-sensitive):
 
    2. `tofu plan`, and include what it wants to change (repo settings, Actions permissions, secrets) in the report. Check its output for stale secrets (see Stale secrets). Do NOT run `tofu apply`.
 
-5. `bask lint` until clean. Apply autofixes, fix remaining oxlint errors in the code (suppressing only per Rules), resolve knip findings (unused deps/exports/files), fix actionlint findings in the repo's workflows, and re-run. The import fixes can take more than one pass to converge. oxlint-tsgolint reports TypeScript errors too, so a clean lint is a full type check (this is why there's no standalone `tsc --noEmit` script).
+5. `bask lint` until clean. Apply autofixes, fix remaining oxlint errors in the code (suppressing only per Rules), resolve knip findings (unused deps/exports/files), fix actionlint findings in the repo's workflows, and re-run. The import fixes can take more than one pass to converge. oxlint-tsgolint reports TypeScript errors too, so a clean lint is a full type check (this is why there's no standalone `tsc --noEmit` script). A dependency that `bump-deps` moved to a new major version can break the code: read its README or changelog in `node_modules` to see how to adapt, rather than pinning it back.
 
    knip's **configuration hints** (e.g. a `project`/`ignore` pattern that no longer matches anything) do not fail the run: knip prints them and still exits 0, so `bask lint` looks clean. Treat them as errors anyway. Fix each one (usually by dropping a stale entry from `knip.ts`), and if one can't be resolved, surface it in the report instead of letting it pass silently.
 
