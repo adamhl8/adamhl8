@@ -25,7 +25,7 @@ This document specifies the repo's target state: the rules that apply throughout
   4. A scoped `overrides` block in `oxlint.config.ts` (keyed by a file glob) only when many files hit it.
   5. A global `rules` override only for a rule that's irrelevant to the whole project.
 
-  There are good reasons to disable a rule sometimes, so take each case on its merits. Every disable comment ends with its reason after a single dash (` - <reason>`). A block disable that doesn't open the file (`/* oxlint-disable <rule> - <reason> */` around a section) needs a matching `/* oxlint-enable <rule> */` where the section ends. Write `oxlint-` directives, never `eslint-` ones. An override looks like this:
+  There are good reasons to disable a rule sometimes, so take each case on its merits. Every disable comment ends with its reason after a single dash (` - <reason>`). A block disable that doesn't open the file (`/* oxlint-disable <rule> - <reason> */` around a section) needs a matching `/* oxlint-enable <rule> */` where the section ends. Disable comments use the `oxlint-` prefix. An override looks like this:
 
   ```ts
   const config = oxlintConfig({
@@ -89,10 +89,10 @@ That one line provides the base tasks (see bask tasks in the configs README), an
 - In CI, `build` fails if the run changed or created any file, so everything the install, `prepare`, lint, and tsdown write must be committed exactly as they leave it, or be gitignored.
 - `bump-deps` runs npm-check-updates, so a repo's `.ncurc.yml` (e.g. a `reject` pin) is real config: keep it.
 
-Repo-specific scripts are extra exported tasks below the `export *` (see Scripts). A repo that changes a base task extends it with a hook instead of redefining it or copying its body. To write a task or a hook, or to convert a justfile, read the bask README (`node_modules/@adamhl8/bask/README.md`). On top of what it says:
+Repo-specific scripts are extra exported tasks below the `export *` (see Scripts). A repo that changes a base task extends it with a hook instead of redefining it or copying its body. To write a task or a hook, read the bask README (`node_modules/@adamhl8/bask/README.md`). On top of what it says:
 
 - Call a local bin by its bare name (`` sh`astro sync` ``), never through `bun` (`` sh`bun astro sync` ``). bun's own subcommands (`bun build`, `bun install`) are not bins and keep their `bun`.
-- A task that only calls a `.sh` helper keeps calling it (`` sh`./scripts/render.sh` ``) instead of inlining the script.
+- `.sh` helpers stay as files, called from their task (`` sh`./scripts/render.sh` ``).
 - `bask.ts` is internal code: it uses bun APIs (see bun) and follows the same lint rules as the rest of the repo.
 
 ### oxlint.config.ts
@@ -438,7 +438,7 @@ Every script lives in `bask.ts` (the standard ones come from the base, repo-spec
 ```
 
 - A repo-specific script (e.g. a Prisma app's `db:*`) is an exported task below the `export *` (`db:generate` -> `export const dbGenerate`, run as `bask db-generate`). A repo-specific extra step in a standard flow extends the base task with a hook (see bask.ts).
-- The only exception is a genuine npm lifecycle script, something the package manager itself must trigger (like `prepare`): those stay in `package.json`. Anything else goes, including `prepublishOnly` and any script that existed only to run replaced tooling.
+- The only exception is a genuine npm lifecycle script, something the package manager itself must trigger (like `prepare`): those stay in `package.json`. Anything else goes.
 
 ### devDependencies
 
@@ -447,7 +447,7 @@ The repo must have every devDependency that applies to it: `@adamhl8/configs` pl
 - Every repo releases, so `release-it` and `release-it-git-cliff` always apply.
 - `tsdown` goes in any repo that builds (see Repo archetypes), bundles included.
 - `@arethetypeswrong/core` is only for a typed library (see Published package shapes).
-- `@types/bun` replaces `@types/node`.
+- `@types/bun`, not `@types/node`.
 
 Notes:
 
@@ -474,7 +474,7 @@ Internal imports are `#` subpath imports (no slash after the `#`), backed by `"i
 
 (Module imports like `bun:test` and `bun:sqlite` are unaffected: they are already explicit imports.)
 
-**Bun APIs.** Wherever bun-only code is fine (see Where bun APIs stop), prefer bun's native APIs over the node ones: `bun.file`/`bun.write` instead of `node:fs` reads and writes, `$` (or `spawn`) instead of `node:child_process`, and in general, when bun has a native API for something the code does manually (`Glob`, `bun:sqlite`, `bun.serve`, `sleep`, `bun.password`), use it. Rewrite existing node imports to the bun equivalents. Where bun has no equivalent, the node API stays: directory operations (`rm` with `recursive`, `cp`, `mkdtemp`), `node:path`, and `node:os`. (`bun.write` creates missing parent directories, so it needs no `mkdir` first.)
+**Bun APIs.** Wherever bun-only code is fine (see Where bun APIs stop), prefer bun's native APIs over the node ones: `bun.file`/`bun.write` instead of `node:fs` reads and writes, `$` (or `spawn`) instead of `node:child_process`, and in general, when bun has a native API for something the code does manually (`Glob`, `bun:sqlite`, `bun.serve`, `sleep`, `bun.password`), use it. Where bun has no equivalent, the node API stays: directory operations (`rm` with `recursive`, `cp`, `mkdtemp`), `node:path`, and `node:os`. (`bun.write` creates missing parent directories, so it needs no `mkdir` first.)
 
 **Where bun APIs stop.** `engines` decides (see Repo archetypes):
 
@@ -484,7 +484,7 @@ Internal imports are `#` subpath imports (no slash after the `#`), backed by `"i
 - A plugin loaded by a browser-like host (Obsidian, IINA) runs neither node nor bun, so its shipped code uses neither runtime's APIs.
 - A single tool that breaks under bun (e.g. a CLI that segfaults) runs under node in its task (`.bun(false)`, see the bask README), and the repo's code that the tool loads keeps node APIs. The rest of the repo stays on bun.
 
-**Shebangs.** An executable `.ts`/`.js` script's shebang is `#!/usr/bin/env bun`. A `.sh` helper keeps its POSIX shell shebang (`#!/usr/bin/env bash`, `#!/bin/sh`), because bun's shell isn't bash. Code that must run on node keeps `#!/usr/bin/env node`: a shipped `bin` under `engines.node`, and the scripts a node runtime runs. Rewrite every other node shebang (including the `-S` forms) to the bun one.
+**Shebangs.** An executable `.ts`/`.js` script's shebang is `#!/usr/bin/env bun`. A `.sh` helper uses a POSIX shell shebang (`#!/usr/bin/env bash`, `#!/bin/sh`), because bun's shell isn't bash. Code that must run on node uses `#!/usr/bin/env node`: a shipped `bin` under `engines.node`, and the scripts a node runtime runs.
 
 **Tests use `bun test`** (only if the repo has tests). Tests import from `"bun:test"`, and test config lives in `bunfig.toml`'s `[test]` block (see bunfig.toml): there is no test config file. Test support code (a setup file, helpers, fixtures) lives under a `__tests__` dir, because the base's coverage skips those dirs. A test setup file is registered via `[test].preload = ["./src/__tests__/test-setup.ts"]`, imports from `"bun:test"`, and registers custom matchers through `expect.extend`. Custom matcher types augment `"bun:test"`:
 
@@ -553,7 +553,7 @@ In this order (some steps are order-sensitive):
 
    2. `tofu plan`, and include what it wants to change (repo settings, Actions permissions, secrets) in the report. Check its output for stale secrets (see Stale secrets). Do NOT run `tofu apply`.
 
-5. `bask lint` until clean. Apply autofixes, fix remaining oxlint errors in the code (suppressing only per Rules), resolve knip findings (unused deps/exports/files), fix actionlint findings in the repo's workflows, and re-run. The import fixes can take more than one pass to converge. oxlint-tsgolint reports TypeScript errors too, so a clean lint is a full type check (this is why there's no standalone `tsc --noEmit` script). A dependency that `bump-deps` moved to a new major version can break the code: read its README or changelog in `node_modules` to see how to adapt, rather than pinning it back.
+5. `bask lint` until clean. Apply autofixes, fix remaining oxlint errors in the code (suppressing only per Rules), resolve knip findings (unused deps/exports/files), fix actionlint findings in the repo's workflows, and re-run. The import fixes can take more than one pass to converge. oxlint-tsgolint reports TypeScript errors too, so a clean lint is a full type check. A dependency that `bump-deps` moved to a new major version can break the code: read its README or changelog in `node_modules` to see how to adapt, rather than pinning it back.
 
    knip's **configuration hints** (e.g. a `project`/`ignore` pattern that no longer matches anything) do not fail the run: knip prints them and still exits 0, so `bask lint` looks clean. Treat them as errors anyway. Fix each one (usually by dropping a stale entry from `knip.ts`), and if one can't be resolved, surface it in the report instead of letting it pass silently.
 
